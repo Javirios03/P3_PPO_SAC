@@ -1,12 +1,12 @@
 ppo_walker2d_pixel:
   algo: ppo
   env_id: Walker2d-v5
-  obs: pixel # seguimos solo con imágenes
-  num_envs: 8
-  total_timesteps: 1_000_000
-  rollout_steps: 2048
-  update_epochs: 10
-  minibatch_size: 64
+  obs: pixel
+  num_envs: 4 # pocos para empezar
+  total_timesteps: 100000 # 100k para test rápido
+  rollout_steps: 128 # tamaño rollout
+  update_epochs: 4 # épocas por rollout
+  minibatch_size: 32
   gamma: 0.99
   gae_lambda: 0.95
   clip_coef: 0.2
