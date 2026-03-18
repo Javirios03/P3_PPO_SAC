@@ -1,0 +1,25 @@
+[project]
+name = "dqn-rainbow-pixel-control"
+version = "0.1.0"
+description = "P2 DRL: Control con pixeles usando DQN y Rainbow"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "dm-control>=1.0.14",
+    "gymnasium[mujoco]>=1.0.0",
+    "imageio>=2.30.0",
+    "ipykernel>=6.0.0",
+    "matplotlib>=3.7.0",
+    "moviepy>=1.0.3",
+    "mujoco>=3.0.0",
+    "numpy>=1.20.0",
+    "opencv-python>=4.8.0",
+    "pygame>=2.5.0",
+    "pyyaml>=6.0.3",
+    "shimmy>=1.0.0",
+    "tensorboard>=2.10.0",
+    "torch @ https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-win_amd64.whl; sys_platform == 'win32' and python_version == '3.11'",
+    "torch>=2.0.0; sys_platform != 'win32'",
+    "torchvision>=0.25.0",
+    "tyro>=0.8.0",
+]

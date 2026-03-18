@@ -1,0 +1,36 @@
+# LaTeX intermediate files
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+
+# Temporal files
+*~
+*.swp
+.DS_Store
+
+# Build directories
+build/
+latexmk/
+
+# --- Python & UV ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+.DS_Store

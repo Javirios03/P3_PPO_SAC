@@ -1,0 +1,194 @@
+%\documentclass{cwpreport} % for review/editing/polishing
+%\linespread{1.5}           % for review/editing/polishing
+\documentclass[onecolumn]{cwpreport} % for final draft
+
+% Packages used by default CWP reports built by M8R
+\usepackage{times,natbib,amsmath,graphicx,color,amssymb,amsbsy,lineno,setspace,algorithm2e,lipsum}
+
+\usepackage[justification=centering]{caption} % Permite centrar los pies de figura
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+
+
+% Specific paper formatting for CWP report
+\setlength{\paperwidth}{8.5in}
+\setlength{\paperheight}{11.0in}
+\setlength{\topmargin}{-0.25in}
+\setlength{\textheight}{8.75in}
+\setlength{\textwidth}{6.5in}
+\setlength{\oddsidemargin}{+.015625in}
+\setlength{\evensidemargin}{+.015625in}
+
+% Final draft only
+% \title[Short Title]{Aprendizaje auto-supervisado de
+% representaciones visuales con SimCLR y
+% evaluación mediante linear probing}
+\title[]{Deep Reinforcement Learning with Value Function and Policy Approximation.\\ Actor-Critic Methods for Continuous Control: PPO and SAC}
+% for editing/reviewing
+%\title{Measuring wave propagation through an open-pit mine using stereo videos} 
+%\righthead{training data}
+%\lefthead{Rapstine & Sava}
+
+% Final draft only
+\author[]{José Ridruejo Tuñón, Joaquín Mir Macías \& Francisco Javier Ríos 
+\\
+Deep Reinforcement Learning} 
+
+% --- CORRECCIÓN DE MÁRGENES DEL ABSTRACT ---
+\makeatletter
+\renewcommand{\left@zm}{0pt} % Elimina el margen izquierdo de 10.5pc
+\makeatother
+% -------------------------------------------
+
+\makeatletter
+\newenvironment{Repository}{%
+    \list{}{%
+        \labelwidth\z@ \labelsep\z@
+        \leftmargin\left@zm \rightmargin\z@
+        \parsep 0pt plus 1pt
+    }%
+    \item[]\reset@font\large{\bf Repository: }
+}{%
+    \endlist
+}
+\makeatother
+
+% --- CONFIGURACIÓN DE ENCABEZADO Y PIE DE PÁGINA ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{} % Borra todos los encabezados y pies de página actuales
+
+% Quitar la línea horizontal del encabezado
+\renewcommand{\headrulewidth}{0pt} 
+
+% Poner el número de página en el centro del pie de página
+\fancyfoot[C]{\thepage} 
+
+% Para que la primera página (la del título) también tenga el número abajo
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyfoot[C]{\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+% ---------------------------------------------------
+
+% --- Centrado Descripción Imagen ---
+% \makeatletter
+% \long\def\GJ@makefigurecaption#1#2{\vskip 6pt
+%  \setbox\@tempboxa\hbox{\reset@font\small{\bf #1.} #2}
+%  \ifdim \wd\@tempboxa >\hsize
+%   % Si el texto es largo, lo metemos en una caja centrada
+%   \parbox{\hsize}{\centering\reset@font\small{\bf #1.} #2\par}
+%  \else
+%    % Si es corto (una línea), lo centra (esto ya lo hacía la clase original)
+%    \ifst@rredfloat
+%      \hbox to\hsize{\hfill\box\@tempboxa\hfill}
+%    \else
+%      \hbox to\hsize{\hfil\box\@tempboxa\hfil}
+%    \fi
+%  \fi
+%  \vskip 6pt
+% }
+% \makeatother
+% ------
+%\author{Thomas Rapstine, Paul Sava, Ashley Grant, \& Jeff Shragge}
+\begin{document}
+
+\maketitle
+
+% Uncomment for final draft only
+%\setcounter{page}{285}
+\journal{}
+
+%% ------------------------------------------------------------
+\begin{abstract}
+    This work studies deep reinforcement learning for continuous control from visual observations using MuJoCo environments from the DeepMind Control Suite accessed through Gymnasium. The focus is on Actor-Critic algorithms with explicit policy approximation: Proximal Policy Optimization (PPO), an on-policy method, and Soft Actor-Critic (SAC), an off-policy maximum-entropy method. We first select and configure a locomotion environment with RGB observations and either discrete or continuous actions. Then, we train PPO and SAC agents for forward locomotion, analyzing the impact of reward design, visual state representation and hyperparameters on learning dynamics. We experimentally compare PPO and SAC in terms of sample efficiency, training stability and final performance, and finally extend the study to a locomotion-with-obstacles variant where the agent must both advance and avoid collisions. The results highlight the practical trade-offs between on-policy and off-policy Actor-Critic methods in visually rich continuous control, as well as the role of entropy regularization, the critic and the replay buffer in achieving robust policies.
+\end{abstract}
+
+\begin{keywords}
+    Deep Reinforcement Learning, Actor-Critic, Proximal Policy Optimization, Soft Actor-Critic, MuJoCo, DeepMind Control Suite, Gymnasium, Continuous Control, Visual Control
+\end{keywords}
+
+%% ------------------------------------------------------------
+\begin{Repository}
+    \url{https://github.com/pepert03/DQN-Rainbow-Pixel-Control}
+\end{Repository}
+
+\section{Introduction}
+
+In this practice we address continuous control problems from the perspective of Actor-Critic methods with explicit policy parameterization. Unlike in the previous assignment, where the policy was implicit and derived from an approximated action-value function $Q(s,a)$, here the agent learns a stochastic policy $\pi_\theta(a \mid s)$ together with a value function used as critic. The state of the environment is provided exclusively through RGB images, so the agent must simultaneously learn a visual representation and a control policy on top of it. [file:387]
+
+The physical simulation is handled by MuJoCo, a physics engine widely used in research on locomotion and manipulation, while the tasks are defined via the DeepMind Control Suite and exposed through Gymnasium, which provides a unified RL API. In this project we implement and/or adapt two representative Actor-Critic algorithms: Proximal Policy Optimization (PPO), an on-policy method based on a clipped surrogate objective and Generalized Advantage Estimation (GAE), and Soft Actor-Critic (SAC), an off-policy method based on the maximum entropy RL framework with replay buffer, double critic and target networks. [file:387]
+
+The goals of the practice are: (i) to understand theoretically and empirically how PPO and SAC work in continuous control with visual observations, (ii) to configure and train agents in locomotion environments, (iii) to compare on-policy vs off-policy behaviour in terms of sample efficiency, stability and final performance, and (iv) to extend the analysis to a more demanding setting where the agent must both move forward and avoid obstacles. The report is structured according to the four parts specified in the assignment: PPO locomotion, SAC locomotion, comparative analysis, and locomotion with obstacles, followed by general conclusions.
+
+\section{PPO for Locomotion}
+\label{sec:ppo}
+
+\subsection{Methodology}
+% Describir elección de entorno (ES/EC), configuración Gymnasium+dm\_control,
+% arquitectura actor-critic con entrada RGB, diseño de recompensa,
+% hiperparámetros de PPO, uso de GAE, etc.
+
+\subsection{Results and Discussion}
+% Curvas de recompensa y pérdidas, análisis de estabilidad,
+% sensibilidad a hiperparámetros clave, ejemplos cualitativos de comportamiento.
+
+\subsection{Conclusions}
+% Resumen de qué ha funcionado y qué no con PPO en locomoción simple.
+
+\section{SAC for Locomotion}
+\label{sec:sac}
+
+\subsection{Methodology}
+% Misma tarea que en la Parte 1, configuración de SAC:
+% replay buffer, doble critic, target networks, entropía y su ajuste automático, etc.
+
+\subsection{Results and Discussion}
+% Curvas de aprendizaje, comparación informal con PPO en la misma tarea,
+% efectos del coeficiente de entropía y del buffer de replay.
+
+\subsection{Conclusions}
+% Qué aporta SAC en esta configuración, ventajas e inconvenientes observados.
+
+\section{Comparative Analysis of PPO and SAC}
+\label{sec:comparison}
+
+\subsection{Methodology}
+% Definir protocolo comparativo:
+% métricas (return medio, varianza, sample efficiency),
+% número de seeds, pasos de entrenamiento, etc.
+
+\subsection{Results and Discussion}
+% Gráficas comparativas de learning curves,
+% tablas con rendimiento final, estabilidad, sensibilidad a hiperparámetros.
+% Discusión crítica on-policy vs off-policy.
+
+\subsection{Conclusions}
+% Conclusiones específicas de la comparativa:
+% en qué escenarios parece preferible PPO o SAC en vuestro entorno.
+
+\section{Locomotion with Obstacles}
+\label{sec:obstacles}
+
+\subsection{Methodology}
+% Descripción del entorno con obstáculos (dm\_control),
+% posibles cambios en observación (RGB + propriocepción),
+% algoritmo elegido (PPO o SAC) y ajustes de recompensa.
+
+\subsection{Results and Discussion}
+% Dificultad adicional del entorno,
+% rendimiento logrado, fallos típicos del agente,
+% impacto de la información adicional (si se usó).
+
+\subsection{Conclusions}
+% Qué se ha aprendido sobre la capacidad del agente para generalizar a entornos más complejos.
+
+\section{General Conclusions}
+\label{sec:conclusions}
+
+\bibliographystyle{seg}
+\bibliography{references}
+%% ------------------------------------------------------------
+\end{document}
