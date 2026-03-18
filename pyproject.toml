@@ -1,25 +1,16 @@
 [project]
-name = "dqn-rainbow-pixel-control"
+name = "p3-ppo-sac"
 version = "0.1.0"
-description = "P2 DRL: Control con pixeles usando DQN y Rainbow"
+description = "P3 DRL PPO and SAC on Walker2D with pixels observations"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
-    "dm-control>=1.0.14",
-    "gymnasium[mujoco]>=1.0.0",
-    "imageio>=2.30.0",
-    "ipykernel>=6.0.0",
-    "matplotlib>=3.7.0",
-    "moviepy>=1.0.3",
+    "gymnasium[mujoco]>=0.29",
+    "matplotlib>=3.10.8",
     "mujoco>=3.0.0",
-    "numpy>=1.20.0",
-    "opencv-python>=4.8.0",
-    "pygame>=2.5.0",
+    "numpy>=2.4.3",
+    "opencv-python>=4.13.0.92",
     "pyyaml>=6.0.3",
-    "shimmy>=1.0.0",
-    "tensorboard>=2.10.0",
-    "torch @ https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-win_amd64.whl; sys_platform == 'win32' and python_version == '3.11'",
-    "torch>=2.0.0; sys_platform != 'win32'",
-    "torchvision>=0.25.0",
-    "tyro>=0.8.0",
+    "tensorboard>=2.20.0",
+    "torch>=2.0",
 ]
