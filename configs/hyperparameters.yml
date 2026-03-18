@@ -1,93 +1,29 @@
-pixel_walker2d:
+ppo_walker2d_pixel:
+  algo: ppo
   env_id: Walker2d-v5
-  obs: pixel # options: pixel, state
-  replay_memory_size: 200000
-  mini_batch_size: 64
-  epsilon_init: 1.0
-  epsilon_decay: 0.999995
-  epsilon_min: 0.01
-  network_sync_rate: 2000
-  learning_rate: 0.0001
-  discount_factor_g: 0.99
+  obs: pixel # seguimos solo con imágenes
   num_envs: 8
-  train_frequency: 4
+  total_timesteps: 1_000_000
+  rollout_steps: 2048
+  update_epochs: 10
+  minibatch_size: 64
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.0
+  learning_rate: 3e-4
 
-rainbow_states_walker2d:
+sac_walker2d_pixel:
+  algo: sac
   env_id: Walker2d-v5
-  obs: state # options: pixel, state
-  replay_memory_size: 200000
-  mini_batch_size: 64
-  epsilon_init: 1.0
-  epsilon_decay: 0.99999
-  epsilon_min: 0.01
-  network_sync_rate: 2000
-  learning_rate: 0.0001
-  discount_factor_g: 0.99
-  num_envs: 30
-  train_frequency: 4
-  enable_double_dqn: true
-  enable_dueling_dqn: true
-  enable_prioritized_replay: true
-  enable_noisy_nets: true
-  enable_distributional: true
-  enable_n_step: true
-
-rainbow_pixel_walker2d:
-  env_id: Walker2d-v5
-  obs: pixel # options: pixel, state
-  replay_memory_size: 200000
-  mini_batch_size: 64
-  epsilon_init: 1.0
-  epsilon_decay: 0.999995
-  epsilon_min: 0.01
-  network_sync_rate: 2000
-  learning_rate: 0.0001
-  discount_factor_g: 0.99
-  num_envs: 30
-  enable_double_dqn: true
-  enable_dueling_dqn: true
-  enable_prioritized_replay: true
-  enable_noisy_nets: true
-  enable_distributional: true
-  enable_n_step: true
-  train_frequency: 4
-
-states_walker2d:
-  env_id: Walker2d-v5
-  obs: state # options: pixel, state
-  replay_memory_size: 200000
-  mini_batch_size: 64
-  epsilon_init: 1.0
-  epsilon_decay: 0.999995
-  epsilon_min: 0.01
-  network_sync_rate: 2000
-  learning_rate: 0.0001
-  discount_factor_g: 0.99
+  obs: pixel
   num_envs: 1
-  enable_double_dqn: false
-  enable_dueling_dqn: false
-  enable_prioritized_replay: false
-  enable_noisy_nets: false
-  enable_distributional: false
-  enable_n_step: false
-  train_frequency: 1
-
-rainbow_cartpole:
-  env_id: CartPole-v1
-  obs: pixel # options: pixel, state
-  replay_memory_size: 100000
-  mini_batch_size: 32
-  epsilon_init: 0.3
-  epsilon_decay: 0.99995
-  epsilon_min: 0.05
-  network_sync_rate: 1000
-  learning_rate: 0.0001
-  discount_factor_g: 0.99
-  num_envs: 30
-  enable_double_dqn: true
-  enable_dueling_dqn: true
-  enable_prioritized_replay: true
-  enable_noisy_nets: true
-  enable_distributional: true
-  enable_n_step: false
-  train_frequency: 4
+  total_timesteps: 1_000_000
+  replay_buffer_size: 200000
+  batch_size: 256
+  gamma: 0.99
+  tau: 0.005
+  actor_lr: 3e-4
+  critic_lr: 3e-4
+  alpha: auto # o un valor fijo
