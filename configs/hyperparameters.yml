@@ -14,6 +14,8 @@ ppo_walker2d_pixel:
   ent_coef: 0.0
   learning_rate: 3e-4
 
+
+
 sac_walker2d_pixel:
   algo: sac
   env_id: Walker2d-v5

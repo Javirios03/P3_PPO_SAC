@@ -1,0 +1,14 @@
+algo: ppo
+clip_coef: 0.2
+ent_coef: 0.0
+env_id: Walker2d-v5
+gae_lambda: 0.95
+gamma: 0.99
+learning_rate: 3e-4
+minibatch_size: 32
+num_envs: 4
+obs: pixel
+rollout_steps: 128
+total_timesteps: 100000
+update_epochs: 4
+vf_coef: 0.5

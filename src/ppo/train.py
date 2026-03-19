@@ -68,7 +68,8 @@ class PPOAgent:
         self.action_space = self.envs.action_space
         
         self.policy = ActorCritic(self.obs_space, self.action_space).to(device)
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=self.config["learning_rate"])
+        lr = float(self.config["learning_rate"])  # Delete once YAML parsing is fixed
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
         
         self.total_timesteps = self.config["total_timesteps"]
         self.rollout_steps = self.config["rollout_steps"]

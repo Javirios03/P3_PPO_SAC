@@ -59,7 +59,8 @@ class DiscretizedActionWrapper(gym.ActionWrapper):
 
     def action(self, action_index):
         # Mapea el entero que devuelve la DQN al vector continuo para MuJoCo
-        return self.actions_grid[action_index]
+        idx = int(action_index.item() if hasattr(action_index, "item") else action_index)
+        return self.actions_grid[idx]
 
 
 class GrayscaleWrapper(gym.ObservationWrapper):
