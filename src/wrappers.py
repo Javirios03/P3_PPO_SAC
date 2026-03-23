@@ -2,102 +2,101 @@ import cv2
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
-
 from gymnasium.wrappers import (
-    AddRenderObservation,
     ResizeObservation,
     FrameStackObservation,
-    HumanRendering,
+    AddRenderObservation,
 )
-import itertools
 
 
-# Discreize continuous actions n into bins, no need to separete into combinations of actions for each dimension, as the agent will just choose one action at a time
-# Example: For HalfCheetah-v5, action space is Box(-1.0, 1.0, (6,), float32)
-# With bins=3, we create discrete actions for each dimension: [-1.0, 0.0, 1.0]
-# The total number of discrete actions becomes 3x6 = 18
-# but the action 0 is the same for all dimensions so we need to remove duplicates
-# The resulting action space is Discrete(13) with actions
+# ---------------------------------------------------------------------------
+# Discretización de acciones continuas
+# ---------------------------------------------------------------------------
 class DiscretizedActionWrapper(gym.ActionWrapper):
+    """
+    Convierte un espacio de acciones continuo Box en uno discreto.
+    Acción 0 = vector de ceros ("no hacer nada").
+    Para cada dimensión, añade bins-1 acciones (las que no son 0).
+    Ejemplo: Walker2d (6 dims) con bins=3 → 1 + 6*2 = 13 acciones.
+    """
     def __init__(self, env, bins=3):
         super().__init__(env)
+        assert isinstance(env.action_space, gym.spaces.Box), \
+            "DiscretizedActionWrapper requiere espacio de acciones Box."
 
-        # Nos aseguramos de que el entorno original sea continuo
-        assert isinstance(
-            env.action_space, gym.spaces.Box
-        ), "Action space must be continuous (Box)."
-
-        low = self.env.action_space.low
-        high = self.env.action_space.high
+        low    = self.env.action_space.low
+        high   = self.env.action_space.high
         n_dims = self.env.action_space.shape[0]
 
-        # 1. Empezamos la lista con la acción base: "No hacer nada" (Vector de ceros)
-        actions = [np.zeros(n_dims, dtype=np.float32)]
-
-        # 2. Iteramos por cada dimensión para crear sus acciones individuales
+        actions = [np.zeros(n_dims, dtype=np.float32)]  # acción base: ceros
         for i in range(n_dims):
-            # Generamos los valores posibles para esta articulación/motor
             values = np.linspace(low[i], high[i], bins)
-
             for v in values:
-                # Evitamos añadir el 0.0 de nuevo, ya que está cubierto por la acción base
                 if not np.isclose(v, 0.0):
-                    # Creamos un vector de ceros y solo modificamos la dimensión actual
-                    action_vec = np.zeros(n_dims, dtype=np.float32)
-                    action_vec[i] = v
-                    actions.append(action_vec)
+                    a = np.zeros(n_dims, dtype=np.float32)
+                    a[i] = v
+                    actions.append(a)
 
-        # Convertimos a array de numpy para acceso rápido en el step
         self.actions_grid = np.array(actions, dtype=np.float32)
-
-        # 3. Definimos el nuevo espacio de acción discreto
-        # Para bins=3 y n_dims=6, esto será Discrete(13)
         self.action_space = Discrete(len(self.actions_grid))
-        print(
-            f"DiscretizedActionWrapper initialized with {len(self.actions_grid)} discrete actions."
-        )
+        print(f"DiscretizedActionWrapper: {len(self.actions_grid)} acciones discretas.")
 
     def action(self, action_index):
-        # Mapea el entero que devuelve la DQN al vector continuo para MuJoCo
         idx = int(action_index.item() if hasattr(action_index, "item") else action_index)
         return self.actions_grid[idx]
 
 
+# ---------------------------------------------------------------------------
+# Conversión a escala de grises con OpenCV
+# ---------------------------------------------------------------------------
 class GrayscaleWrapper(gym.ObservationWrapper):
-    """Convert RGB observations to grayscale using cv2 (faster than numpy)."""
-
+    """Convierte observaciones RGB a escala de grises."""
     def __init__(self, env):
         super().__init__(env)
-        obs_shape = self.observation_space.shape  # (H, W, 3)
-        self.observation_space = Box(
-            low=0, high=255, shape=(obs_shape[0], obs_shape[1]), dtype=np.uint8
-        )
+        h, w = self.observation_space.shape[:2]
+        self.observation_space = Box(low=0, high=255, shape=(h, w), dtype=np.uint8)
 
     def observation(self, obs):
         return cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
 
 
-class RenderGrayscaleWrapper(gym.ObservationWrapper):
-    """Replace obs with grayscale render in a single wrapper.
-    Expects env created with render_mode='rgb_array' and width/height
-    already set to target resolution so no resize is needed."""
+# ---------------------------------------------------------------------------
+# Wrapper clave: obtiene el render, lo redimensiona y convierte a gris
+# ---------------------------------------------------------------------------
+class PixelObservationWrapper(gym.ObservationWrapper):
+    """
+    Reemplaza la observación del entorno por un frame renderizado en gris.
+    El entorno debe estar creado con render_mode='rgb_array'.
+    El frame se redimensiona a obs_size x obs_size.
 
+    Compatible con:
+      - Walker2d-v5 (renderiza directamente a 84x84 si se pasa width/height)
+      - CartPole-v1 (renderiza a resolución por defecto, luego resize)
+    """
     def __init__(self, env, obs_size=84):
         super().__init__(env)
-        self._obs_size = obs_size
+        self.obs_size = obs_size
         self.observation_space = Box(
             low=0, high=255, shape=(obs_size, obs_size), dtype=np.uint8
         )
 
     def observation(self, obs):
-        frame = self.env.render()  # already at target resolution
+        frame = self.env.render()          # RGB np.array (H, W, 3)
+        if frame is None:
+            return np.zeros((self.obs_size, self.obs_size), dtype=np.uint8)
+        # Resize si hace falta
+        if frame.shape[0] != self.obs_size or frame.shape[1] != self.obs_size:
+            frame = cv2.resize(frame, (self.obs_size, self.obs_size),
+                               interpolation=cv2.INTER_AREA)
         return cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
 
+# ---------------------------------------------------------------------------
+# Visualización en tiempo real con OpenCV (solo para eval)
+# ---------------------------------------------------------------------------
 class OpenCVRenderWrapper(gym.Wrapper):
-    """Muestra el renderizado en una ventana flotante usando OpenCV."""
-
-    def __init__(self, env, window_name="MuJoCo Preview"):
+    """Muestra el render en ventana flotante OpenCV (usa solo para evaluación)."""
+    def __init__(self, env, window_name="Preview"):
         super().__init__(env)
         self.window_name = window_name
 
@@ -105,7 +104,6 @@ class OpenCVRenderWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         img = self.env.render()
         if img is not None:
-            # Convertir RGB a BGR para OpenCV y redimensionar para ver mejor
             img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             img_bgr = cv2.resize(img_bgr, (480, 480), interpolation=cv2.INTER_NEAREST)
             cv2.imshow(self.window_name, img_bgr)
@@ -117,64 +115,61 @@ class OpenCVRenderWrapper(gym.Wrapper):
         return self.env.close()
 
 
-class WalkerReward(gym.Wrapper):
-    def __init__(self, env, torso_weight=1.0, knee_weight=0.3, symmetry_weight=0.1):
+# ---------------------------------------------------------------------------
+# Reward shaping para Walker2d
+# ---------------------------------------------------------------------------
+class WalkerRewardWrapper(gym.RewardWrapper):
+    """
+    Penaliza el ángulo del torso, las rodillas hiperestendidas y la asimetría
+    de marcha. Mantiene el reward de avance como señal principal.
+    """
+    def __init__(self, env, torso_w=1.0, knee_w=0.3, sym_w=0.1):
         super().__init__(env)
-        self.torso_weight = torso_weight
-        self.knee_weight = knee_weight
-        self.symmetry_weight = symmetry_weight
+        self.torso_w = torso_w
+        self.knee_w  = knee_w
+        self.sym_w   = sym_w
+        # Guardamos la última obs para el reward shaping
+        self._last_obs = None
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
+        self._last_obs = obs
+        return obs, self.reward(reward), terminated, truncated, info
 
-        torso_angle = obs[1]
-        left_knee = obs[3]
-        right_knee = obs[6]
-        left_hip = obs[2]
-        right_hip = obs[5]
+    def reward(self, reward):
+        if self._last_obs is None:
+            return reward
+        obs = self._last_obs
+        # Índices del espacio de observación de Walker2d-v5:
+        # 0: z del torso, 1: ángulo torso, 2: muslo izq, 3: pierna izq,
+        # 4: pie izq, 5: muslo der, 6: pierna der, 7: pie der, ...
+        torso_angle  = obs[1]
+        left_knee    = obs[3]
+        right_knee   = obs[6]
+        left_thigh   = obs[2]
+        right_thigh  = obs[5]
 
-        torso_penalty = self.torso_weight * torso_angle**2
-        knee_penalty = self.knee_weight * (left_knee**2 + right_knee**2)
-        symmetry_penalty = self.symmetry_weight * (
-            (left_knee - right_knee) ** 2 + (left_hip - right_hip) ** 2
+        torso_penalty = self.torso_w * torso_angle ** 2
+        knee_penalty  = self.knee_w  * (left_knee ** 2 + right_knee ** 2)
+        sym_penalty   = self.sym_w   * (
+            (left_knee  - right_knee)  ** 2 +
+            (left_thigh - right_thigh) ** 2
         )
-
-        # Shaped reward
-        shaped_reward = reward - torso_penalty - knee_penalty - symmetry_penalty
-
-        return obs, shaped_reward, terminated, truncated, info
+        return reward - torso_penalty - knee_penalty - sym_penalty
 
 
-def make_state_env(env_id, render=False, seed=42):
-
-    if "Walker2d-v5" in env_id:
-        env = gym.make(
-            env_id,
-            render_mode="human" if render else None,
-            healthy_angle_range=(-0.4, 0.4),
-            max_episode_steps=2500,
-        )
-        env = WalkerReward(env)
-    else:
-        env = gym.make(env_id, render_mode="human" if render else None)
-
-    # Discretize actions if needed
-    if isinstance(env.action_space, Box):
-        env = DiscretizedActionWrapper(env, bins=3)
-
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
-    return env
-
-
+# ---------------------------------------------------------------------------
+# Constructores de entorno
+# ---------------------------------------------------------------------------
 def make_pixel_env(env_id, render=False, seed=42):
     """
-    Creates env with Pixel observation + Discretization + Stack.
-    Renders directly at 84x84 to avoid expensive high-res render + resize.
+    Pipeline para observaciones en píxeles (gris, 84×84, stack de 4 frames).
+    Estructura del stack resultante: (4, 84, 84) — listo para CNN.
     """
     obs_size = 84
 
-    if "Walker2d-v5" in env_id:
+    if "Walker2d" in env_id:
+        # MuJoCo renderiza directamente al tamaño pedido → sin resize posterior
         env = gym.make(
             env_id,
             render_mode="rgb_array",
@@ -183,24 +178,55 @@ def make_pixel_env(env_id, render=False, seed=42):
             healthy_angle_range=(-0.4, 0.4),
             max_episode_steps=2500,
         )
-        env = WalkerReward(env)
+        env = WalkerRewardWrapper(env)
+
+    elif "CartPole" in env_id:
+        # CartPole no acepta width/height → render a resolución nativa, luego resize
+        env = gym.make(env_id, render_mode="rgb_array")
+
+    elif "Hopper" in env_id or "HalfCheetah" in env_id:
+        env = gym.make(
+            env_id,
+            render_mode="rgb_array",
+            width=obs_size,
+            height=obs_size,
+        )
     else:
-        env = gym.make(env_id, render_mode="rgb_array", width=obs_size, height=obs_size)
+        env = gym.make(env_id, render_mode="rgb_array")
 
-    # Single wrapper: render → grayscale (no resize needed, already 84x84)
-    env = RenderGrayscaleWrapper(env, obs_size=obs_size)
+    # Wrapper principal: render → gris → (84, 84)
+    env = PixelObservationWrapper(env, obs_size=obs_size)
 
-    # Discretize actions only for continuous-control envs (MuJoCo Box).
-    # For discrete-action envs (e.g., CartPole), keep the original Discrete action space.
+    # Discretización para entornos con acción continua
     if isinstance(env.action_space, Box):
         env = DiscretizedActionWrapper(env, bins=3)
 
-    # Stack frames
+    # Stack de 4 frames: (84, 84) × 4 → (4, 84, 84)
     env = FrameStackObservation(env, stack_size=4)
 
     if render:
-        # env = HumanRendering(env)
         env = OpenCVRenderWrapper(env)
+
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
+
+
+def make_state_env(env_id, render=False, seed=42):
+    """Entorno con observación de estado vectorial."""
+    if "Walker2d" in env_id:
+        env = gym.make(
+            env_id,
+            render_mode="human" if render else None,
+            healthy_angle_range=(-0.4, 0.4),
+            max_episode_steps=2500,
+        )
+        env = WalkerRewardWrapper(env)
+    else:
+        env = gym.make(env_id, render_mode="human" if render else None)
+
+    if isinstance(env.action_space, Box):
+        env = DiscretizedActionWrapper(env, bins=3)
 
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -213,23 +239,18 @@ def make_env(env_id, obs_type, render=False, seed=42):
     elif obs_type == "state":
         return make_state_env(env_id, render, seed)
     else:
-        raise ValueError(f"Unsupported obs_type: {obs_type}")
+        raise ValueError(f"obs_type desconocido: {obs_type}")
 
 
 def make_vec_env(env_id, obs_type, num_envs, seed=42):
-    """Create a vectorized environment with num_envs parallel environments.
-    Uses AsyncVectorEnv for pixel obs (parallel rendering in subprocesses)
-    and SyncVectorEnv for state obs."""
-
+    """
+    Crea un entorno vectorizado con num_envs entornos en paralelo.
+    Usa SyncVectorEnv (más seguro con MuJoCo en múltiples procesos).
+    """
     def _make_thunk(idx):
         def _thunk():
             return make_env(env_id, obs_type, render=False, seed=seed + idx)
-
         return _thunk
 
     thunks = [_make_thunk(i) for i in range(num_envs)]
-    if obs_type == "pixel":
-        # SyncVectorEnv for pixel: avoids per-subprocess OpenGL context
-        # limits (MuJoCo framebuffer crash on Windows with many envs).
-        return gym.vector.SyncVectorEnv(thunks)
     return gym.vector.SyncVectorEnv(thunks)

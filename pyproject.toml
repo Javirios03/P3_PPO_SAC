@@ -5,7 +5,7 @@ description = "P3 DRL PPO and SAC on Walker2D with pixels observations"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "gymnasium[mujoco]>=0.29",
+    "gymnasium[classic-control,mujoco]>=0.29",
     "matplotlib>=3.10.8",
     "mujoco>=3.0.0",
     "numpy>=2.4.3",
