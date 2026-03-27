@@ -139,6 +139,7 @@ class PPOAgent:
         self.ent_coef = float(config["ent_coef"])
         self.learning_rate = float(config["learning_rate"])
         self.max_grad_norm = float(config["max_grad_norm"])
+        self.env_kwargs = config.get("env_kwargs", {})
 
         # Path to Run info
         self.LOG_FILE = os.path.join(RUNS_DIR, self.hyperparameter_set, "training.log")
@@ -149,11 +150,11 @@ class PPOAgent:
 
     def load_model(self, is_training=True, render=False):
         if is_training:
-            envs = make_vec_env(self.env_id, self.obs_type, self.num_envs)
+            envs = make_vec_env(self.env_id, self.obs_type, self.num_envs, env_kwargs=self.env_kwargs)
             obs_space = envs.single_observation_space
             action_space = envs.single_action_space
         else:
-            envs = make_env(self.env_id, self.obs_type, render=render, seed=999)
+            envs = make_env(self.env_id, self.obs_type, render=render, seed=999, env_kwargs=self.env_kwargs)
             obs_space = envs.observation_space
             action_space = envs.action_space
 

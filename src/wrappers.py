@@ -199,69 +199,25 @@ class EvalRenderWrapper(gym.Wrapper):
 
 
 # ---------------------------------------------------------------------------
-# Reward shaping for Walker2d
-# ---------------------------------------------------------------------------
-class WalkerRewardWrapper(gym.RewardWrapper):
-    def __init__(self, env, torso_w=1.0, knee_w=0.3, sym_w=0.1):
-        super().__init__(env)
-        self.torso_w = torso_w
-        self.knee_w = knee_w
-        self.sym_w = sym_w
-        self._last_obs = None
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        self._last_obs = obs
-        return obs, self.reward(reward), terminated, truncated, info
-
-    def reward(self, reward):
-        if self._last_obs is None:
-            return reward
-        obs = self._last_obs
-        torso_angle = obs[1]
-        left_knee = obs[3]
-        right_knee = obs[6]
-        left_thigh = obs[2]
-        right_thigh = obs[5]
-        torso_penalty = self.torso_w * torso_angle ** 2
-        knee_penalty = self.knee_w * (left_knee ** 2 + right_knee ** 2)
-        sym_penalty = self.sym_w * (
-            (left_knee - right_knee) ** 2 +
-            (left_thigh - right_thigh) ** 2
-        )
-        return reward - torso_penalty - knee_penalty - sym_penalty
-
-
-# ---------------------------------------------------------------------------
 # Environment constructors
 # ---------------------------------------------------------------------------
-def make_pixel_env(env_id, render=False, seed=42):
-    obs_size = 84
+def _supports_width_height(env_id):
+    """Return True for MuJoCo envs that accept width/height in gym.make."""
+    return any(tag in env_id for tag in ("Walker2d", "Hopper", "HalfCheetah", "Humanoid"))
 
-    if "Walker2d" in env_id:
-        env = gym.make(
-            env_id,
-            render_mode="rgb_array",
-            width=obs_size,
-            height=obs_size,
-            healthy_angle_range=(-0.4, 0.4),
-            max_episode_steps=2500,
-        )
-        env = WalkerRewardWrapper(env)
-        env = RenderGrayscaleWrapper(env, obs_size=obs_size)
-    elif "CartPole" in env_id:
-        env = gym.make(env_id, render_mode="rgb_array")
-        env = PixelObservationWrapper(env, obs_size=obs_size)
-    elif "Hopper" in env_id or "HalfCheetah" in env_id:
-        env = gym.make(
-            env_id,
-            render_mode="rgb_array",
-            width=obs_size,
-            height=obs_size,
-        )
+
+def make_pixel_env(env_id, render=False, seed=42, env_kwargs=None):
+    obs_size = 84
+    kwargs = dict(env_kwargs or {})
+    kwargs["render_mode"] = "rgb_array"
+
+    if _supports_width_height(env_id):
+        kwargs.setdefault("width", obs_size)
+        kwargs.setdefault("height", obs_size)
+        env = gym.make(env_id, **kwargs)
         env = RenderGrayscaleWrapper(env, obs_size=obs_size)
     else:
-        env = gym.make(env_id, render_mode="rgb_array")
+        env = gym.make(env_id, **kwargs)
         env = PixelObservationWrapper(env, obs_size=obs_size)
 
     if isinstance(env.action_space, Box):
@@ -277,17 +233,10 @@ def make_pixel_env(env_id, render=False, seed=42):
     return env
 
 
-def make_state_env(env_id, render=False, seed=42):
-    if "Walker2d" in env_id:
-        env = gym.make(
-            env_id,
-            render_mode="human" if render else None,
-            healthy_angle_range=(-0.4, 0.4),
-            max_episode_steps=2500,
-        )
-        env = WalkerRewardWrapper(env)
-    else:
-        env = gym.make(env_id, render_mode="human" if render else None)
+def make_state_env(env_id, render=False, seed=42, env_kwargs=None):
+    kwargs = dict(env_kwargs or {})
+    kwargs["render_mode"] = "human" if render else None
+    env = gym.make(env_id, **kwargs)
 
     if isinstance(env.action_space, Box):
         env = DiscretizedActionWrapper(env, bins=3)
@@ -297,20 +246,20 @@ def make_state_env(env_id, render=False, seed=42):
     return env
 
 
-def make_env(env_id, obs_type, render=False, seed=42):
+def make_env(env_id, obs_type, render=False, seed=42, env_kwargs=None):
     if obs_type == "pixel":
-        return make_pixel_env(env_id, render, seed)
+        return make_pixel_env(env_id, render, seed, env_kwargs)
     elif obs_type == "state":
-        return make_state_env(env_id, render, seed)
+        return make_state_env(env_id, render, seed, env_kwargs)
     else:
         raise ValueError(f"Unsupported obs_type: {obs_type}")
 
 
-def make_vec_env(env_id, obs_type, num_envs, seed=42):
+def make_vec_env(env_id, obs_type, num_envs, seed=42, env_kwargs=None):
     """Create a vectorized environment with num_envs parallel envs."""
     def _make_thunk(idx):
         def _thunk():
-            return make_env(env_id, obs_type, render=False, seed=seed + idx)
+            return make_env(env_id, obs_type, render=False, seed=seed + idx, env_kwargs=env_kwargs)
         return _thunk
 
     thunks = [_make_thunk(i) for i in range(num_envs)]

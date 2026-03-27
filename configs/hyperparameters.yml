@@ -29,3 +29,8 @@ ppo_walker2d_pixel:
   ent_coef: 0.0
   learning_rate: 3e-4
   max_grad_norm: 0.5
+  env_kwargs:
+    max_episode_steps: 20000
+    forward_reward_weight: 0.5
+    ctrl_cost_weight: 0.1
+    healthy_reward: 1.25
