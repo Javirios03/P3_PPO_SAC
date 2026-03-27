@@ -1,28 +1,22 @@
 import os
 import time
+import itertools
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical, Normal
 import gymnasium as gym
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+from torch.utils.tensorboard import SummaryWriter
 
-from src.config import load_config, device, RUNS_DIR
-from src.wrappers import make_vec_env, make_env
+from src.utils import load_config, device, RUNS_DIR, DATE_FORMAT, save_graph
+from src.wrappers import make_env, make_vec_env
 
-# TensorBoard — importación opcional: si no está instalado, el logging se omite
-try:
-    from torch.utils.tensorboard import SummaryWriter
-    _TB_AVAILABLE = True
-except ImportError:
-    _TB_AVAILABLE = False
-    print("[PPO] TensorBoard no disponible. Instala tensorboard para activarlo.")
+torch.backends.cudnn.benchmark = True
 
 
 # ---------------------------------------------------------------------------
-# Utilidad: calcular la forma de salida de la CNN dado el obs_space
+# Conv output size helper
 # ---------------------------------------------------------------------------
 def _conv_out_size(obs_shape):
     dummy = torch.zeros(1, *obs_shape)
@@ -37,12 +31,12 @@ def _conv_out_size(obs_shape):
 
 
 # ---------------------------------------------------------------------------
-# Red Actor-Critic compartida
+# Actor-Critic network
 # ---------------------------------------------------------------------------
 class ActorCritic(nn.Module):
     def __init__(self, obs_space, action_space):
         super().__init__()
-        obs_shape = obs_space.shape  # (4, 84, 84)
+        obs_shape = obs_space.shape
 
         self.conv = nn.Sequential(
             nn.Conv2d(obs_shape[0], 32, 8, 4), nn.ReLU(),
@@ -90,7 +84,7 @@ class ActorCritic(nn.Module):
         if self.is_discrete:
             dist = Categorical(logits=self.actor(x))
         else:
-            mu  = self.actor_mu(x)
+            mu = self.actor_mu(x)
             std = self.log_std.exp().expand_as(mu)
             dist = Normal(mu, std)
         return dist, self.critic(x)
@@ -106,7 +100,7 @@ class ActorCritic(nn.Module):
 def compute_gae(rewards, values, dones, next_value, gamma, gae_lambda):
     T, N = rewards.shape
     advantages = np.zeros((T, N), dtype=np.float32)
-    last_gae   = np.zeros(N, dtype=np.float32)
+    last_gae = np.zeros(N, dtype=np.float32)
 
     for t in reversed(range(T)):
         if t == T - 1:
@@ -115,7 +109,7 @@ def compute_gae(rewards, values, dones, next_value, gamma, gae_lambda):
         else:
             next_non_terminal = 1.0 - dones[t + 1]
             next_val = values[t + 1]
-        delta    = rewards[t] + gamma * next_val * next_non_terminal - values[t]
+        delta = rewards[t] + gamma * next_val * next_non_terminal - values[t]
         last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
         advantages[t] = last_gae
 
@@ -123,187 +117,251 @@ def compute_gae(rewards, values, dones, next_value, gamma, gae_lambda):
 
 
 # ---------------------------------------------------------------------------
-# Utilidades de logging / gráficas
-# ---------------------------------------------------------------------------
-def _save_plots(run_dir, all_ep_rewards, actor_losses, critic_losses, entropies, timesteps):
-    """Genera rewards.png y losses.png en run_dir/plots/."""
-    plots_dir = os.path.join(run_dir, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
-
-    # Recompensa
-    fig, ax = plt.subplots(figsize=(9, 4))
-    rewards_arr = np.array(all_ep_rewards)
-    mean_r = np.array([
-        rewards_arr[max(0, i - 99): i + 1].mean()
-        for i in range(len(rewards_arr))
-    ])
-    ax.plot(rewards_arr, alpha=0.25, color="steelblue", label="ep reward")
-    ax.plot(mean_r, color="steelblue", linewidth=2, label="media(100 eps)")
-    ax.set_xlabel("Episodio")
-    ax.set_ylabel("Recompensa")
-    ax.set_title("Evolución de la recompensa (entrenamiento)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(os.path.join(plots_dir, "rewards.png"), dpi=120)
-    plt.close(fig)
-
-    # Pérdidas
-    if actor_losses:
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
-        axes[0].plot(timesteps, actor_losses,  color="tomato")
-        axes[0].set_title("Actor loss")
-        axes[0].set_xlabel("Timestep")
-        axes[0].grid(True, alpha=0.3)
-
-        axes[1].plot(timesteps, critic_losses, color="seagreen")
-        axes[1].set_title("Critic loss")
-        axes[1].set_xlabel("Timestep")
-        axes[1].grid(True, alpha=0.3)
-
-        axes[2].plot(timesteps, entropies, color="mediumpurple")
-        axes[2].set_title("Entropía media")
-        axes[2].set_xlabel("Timestep")
-        axes[2].grid(True, alpha=0.3)
-
-        fig.tight_layout()
-        fig.savefig(os.path.join(plots_dir, "losses.png"), dpi=120)
-        plt.close(fig)
-
-    print(f"[PPO] Gráficas guardadas en {plots_dir}/")
-
-
-# ---------------------------------------------------------------------------
-# Agente PPO
+# PPO Agent
 # ---------------------------------------------------------------------------
 class PPOAgent:
-    def __init__(self, config_name):
-        self.config      = load_config(config_name)
-        self.config_name = config_name
-        print(f"[PPO] Config: {self.config}")
-        print(f"[PPO] Device: {device}")
 
-        self.envs         = make_vec_env(self.config["env_id"], "pixel", self.config["num_envs"])
-        self.obs_space    = self.envs.single_observation_space
-        self.action_space = self.envs.single_action_space
-        print(f"[PPO] Obs space:    {self.obs_space}")
-        print(f"[PPO] Action space: {self.action_space}")
+    def __init__(self, hyperparameter_set):
+        config = load_config(hyperparameter_set)
+        self.config = config
+        self.hyperparameter_set = hyperparameter_set
 
-        self.policy = ActorCritic(self.obs_space, self.action_space).to(device)
-        print(f"[PPO] Parámetros: {sum(p.numel() for p in self.policy.parameters()):,}")
+        self.env_id = config["env_id"]
+        self.obs_type = config.get("obs", "pixel")
+        self.num_envs = int(config["num_envs"])
+        self.rollout_steps = int(config["rollout_steps"])
+        self.update_epochs = int(config["update_epochs"])
+        self.batch_size = int(config["batch_size"])
+        self.gamma = float(config["gamma"])
+        self.gae_lambda = float(config["gae_lambda"])
+        self.clip_coef = float(config["clip_coef"])
+        self.vf_coef = float(config["vf_coef"])
+        self.ent_coef = float(config["ent_coef"])
+        self.learning_rate = float(config["learning_rate"])
+        self.max_grad_norm = float(config["max_grad_norm"])
 
-        lr = float(self.config["learning_rate"])
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr, eps=1e-5)
+        # Path to Run info
+        self.LOG_FILE = os.path.join(RUNS_DIR, self.hyperparameter_set, "training.log")
+        self.MODEL_FILE = os.path.join(RUNS_DIR, self.hyperparameter_set, "best_model.pt")
+        self.CHECKPOINT_FILE = os.path.join(RUNS_DIR, self.hyperparameter_set, "checkpoint.pt")
+        self.GRAPH_FILE = os.path.join(RUNS_DIR, self.hyperparameter_set, "graph.png")
+        self.TB_DIR = os.path.join(RUNS_DIR, self.hyperparameter_set, "tensorboard")
 
-        self.total_timesteps = int(self.config["total_timesteps"])
-        self.rollout_steps   = int(self.config["rollout_steps"])
-        self.num_envs        = int(self.config["num_envs"])
-        self.batch_size      = int(self.config["batch_size"])
-        self.update_epochs   = int(self.config["update_epochs"])
+    def load_model(self, is_training=True, render=False):
+        if is_training:
+            envs = make_vec_env(self.env_id, self.obs_type, self.num_envs)
+            obs_space = envs.single_observation_space
+            action_space = envs.single_action_space
+        else:
+            envs = make_env(self.env_id, self.obs_type, render=render, seed=999)
+            obs_space = envs.observation_space
+            action_space = envs.action_space
 
-        self.run_dir = os.path.join(RUNS_DIR, config_name)
-        os.makedirs(self.run_dir, exist_ok=True)
+        self.is_discrete = isinstance(action_space, gym.spaces.Discrete)
 
-        self.log_path = os.path.join(self.run_dir, "training_log.csv")
+        policy = ActorCritic(obs_space, action_space).to(device)
+        print(f"[PPO] Parameters: {sum(p.numel() for p in policy.parameters()):,}")
 
-        # TensorBoard writer
-        self.writer = None
-        if _TB_AVAILABLE:
-            tb_dir = os.path.join(self.run_dir, "tensorboard")
-            self.writer = SummaryWriter(log_dir=tb_dir)
-            print(f"[PPO] TensorBoard activo → tensorboard --logdir {tb_dir}")
+        optimizer = None
+        if is_training:
+            optimizer = torch.optim.Adam(policy.parameters(), lr=self.learning_rate, eps=1e-5)
 
-    # ------------------------------------------------------------------
-    # ENTRENAMIENTO
-    # ------------------------------------------------------------------
-    def _train(self):
-        obs, _ = self.envs.reset()
+        start_episode = 0
+        best_reward = float("-inf")
+        rewards_per_episode = []
+        actor_losses = []
+        critic_losses = []
+        entropies = []
+        global_step = 0
+        ep_reward_buf = np.zeros(self.num_envs) if is_training else None
 
-        total_updates  = self.total_timesteps // (self.rollout_steps * self.num_envs)
-        global_step    = 0
-        ep_rewards_all = []
-        ep_reward_buf  = np.zeros(self.num_envs)
+        if is_training:
+            if os.path.exists(self.CHECKPOINT_FILE):
+                checkpoint = torch.load(self.CHECKPOINT_FILE, map_location=device, weights_only=False)
+                policy.load_state_dict(checkpoint["policy_state_dict"])
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                start_episode = int(checkpoint.get("episode", 0)) + 1
+                best_reward = float(checkpoint.get("best_reward", best_reward))
+                rewards_per_episode = list(checkpoint.get("rewards_per_episode", []))
+                actor_losses = list(checkpoint.get("actor_losses", []))
+                critic_losses = list(checkpoint.get("critic_losses", []))
+                entropies = list(checkpoint.get("entropies", []))
+                global_step = int(checkpoint.get("global_step", 0))
+                print(f"Resumed from episode {start_episode - 1} | global_step={global_step}")
+            else:
+                print("Starting training from scratch.")
+        else:
+            if os.path.exists(self.MODEL_FILE):
+                policy.load_state_dict(torch.load(self.MODEL_FILE, map_location=device))
+                policy.eval()
+                print(f"Loaded model weights from: {self.MODEL_FILE}")
 
-        plot_timesteps   = []
-        plot_actor_loss  = []
-        plot_critic_loss = []
-        plot_entropy     = []
+        return (
+            envs, policy, optimizer,
+            rewards_per_episode, actor_losses, critic_losses, entropies,
+            best_reward, start_episode, global_step, ep_reward_buf,
+        )
 
-        with open(self.log_path, "w") as f:
-            f.write("update,timestep,mean_ep_reward,actor_loss,critic_loss,entropy,sps\n")
+    def save_model(self, policy, optimizer, episode_reward, episode, best_reward,
+                   rewards_per_episode, actor_losses, critic_losses, entropies, global_step):
+        if episode_reward > best_reward:
+            log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New best reward {episode_reward:0.1f} ({(episode_reward - best_reward) / abs(best_reward) * 100 if best_reward != float('-inf') else 0:+.1f}%) at episode {episode}, saving model..."
+            print(log_message)
+            with open(self.LOG_FILE, "a") as file:
+                file.write(log_message + "\n")
+            torch.save(policy.state_dict(), self.MODEL_FILE)
 
-        start_time = time.time()
+        elif episode % 100 == 0:
+            checkpoint = {
+                "policy_state_dict": policy.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "episode": episode,
+                "best_reward": best_reward,
+                "rewards_per_episode": rewards_per_episode,
+                "actor_losses": actor_losses,
+                "critic_losses": critic_losses,
+                "entropies": entropies,
+                "global_step": global_step,
+            }
+            if os.path.exists(self.CHECKPOINT_FILE):
+                os.remove(self.CHECKPOINT_FILE)
+            torch.save(checkpoint, self.CHECKPOINT_FILE)
+            log_message = f"{datetime.now().strftime(DATE_FORMAT)}: Checkpoint saved at episode {episode}"
+            print(log_message)
+            with open(self.LOG_FILE, "a") as file:
+                file.write(log_message + "\n")
 
-        for update in range(1, total_updates + 1):
-            # ── 1. Rollout ────────────────────────────────────────────
-            all_obs      = np.zeros((self.rollout_steps, self.num_envs, *self.obs_space.shape), dtype=np.uint8)
-            all_actions  = np.zeros((self.rollout_steps, self.num_envs),
-                                    dtype=np.int64 if self.is_discrete else np.float32)
+    def run(self, is_training=True, render=False):
+        writer = None
+        if is_training:
+            start_time = datetime.now()
+            last_graph_update_time = start_time
+
+            log_message = f"{start_time.strftime(DATE_FORMAT)}: Training starting..."
+            print(log_message)
+            with open(self.LOG_FILE, "a") as file:
+                file.write(log_message + "\n")
+
+            writer = SummaryWriter(log_dir=self.TB_DIR)
+
+        # Best eval video tracking
+        best_eval_reward = float("-inf")
+        if not is_training:
+            eval_dir = os.path.join(RUNS_DIR, self.hyperparameter_set, "eval")
+            os.makedirs(eval_dir, exist_ok=True)
+            reward_file = os.path.join(eval_dir, "best_reward.txt")
+            video_file = os.path.join(eval_dir, "best.mp4")
+            if os.path.exists(reward_file):
+                with open(reward_file, "r") as f:
+                    best_eval_reward = float(f.read().strip())
+                print(f"Previous best eval reward: {best_eval_reward:.1f}")
+
+        (
+            envs, policy, optimizer,
+            rewards_per_episode, actor_losses, critic_losses, entropies,
+            best_reward, start_episode, global_step, ep_reward_buf,
+        ) = self.load_model(is_training=is_training, render=render)
+
+        if is_training:
+            self._train_loop(
+                envs, policy, optimizer, writer,
+                rewards_per_episode, actor_losses, critic_losses, entropies,
+                best_reward, start_episode, global_step, ep_reward_buf,
+                last_graph_update_time,
+            )
+        else:
+            self._eval_loop(
+                envs, policy,
+                best_eval_reward, reward_file, video_file,
+            )
+
+        if writer is not None:
+            writer.close()
+        envs.close()
+
+    def _train_loop(self, envs, policy, optimizer, writer,
+                    rewards_per_episode, actor_losses, critic_losses, entropies,
+                    best_reward, start_episode, global_step, ep_reward_buf,
+                    last_graph_update_time):
+
+        obs_space = envs.single_observation_space
+        obs, _ = envs.reset()
+        train_start = time.time()
+
+        for episode in itertools.count(start_episode):
+            episode_start_time = time.time()
+
+            # ── 1. Rollout ──
+            all_obs = np.zeros((self.rollout_steps, self.num_envs, *obs_space.shape), dtype=np.uint8)
+            all_actions = np.zeros((self.rollout_steps, self.num_envs),
+                                   dtype=np.int64 if self.is_discrete else np.float32)
             all_logprobs = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
-            all_values   = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
-            all_rewards  = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
-            all_dones    = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
+            all_values = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
+            all_rewards = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
+            all_dones = np.zeros((self.rollout_steps, self.num_envs), dtype=np.float32)
+
+            episodes_completed = 0
 
             for step in range(self.rollout_steps):
                 all_obs[step] = obs
                 with torch.no_grad():
-                    obs_t = torch.tensor(obs, dtype=torch.float32).to(device)
-                    dist, value = self.policy(obs_t)
-                    action  = dist.sample()
+                    obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
+                    dist, value = policy(obs_t)
+                    action = dist.sample()
                     logprob = dist.log_prob(action)
                     if not self.is_discrete:
                         logprob = logprob.sum(-1)
 
-                all_actions[step]  = action.cpu().numpy()
+                all_actions[step] = action.cpu().numpy()
                 all_logprobs[step] = logprob.cpu().numpy()
-                all_values[step]   = value.squeeze(-1).cpu().numpy()
+                all_values[step] = value.squeeze(-1).cpu().numpy()
 
-                obs, reward, terminated, truncated, _ = self.envs.step(action.cpu().numpy())
+                obs, reward, terminated, truncated, _ = envs.step(action.cpu().numpy())
                 done = np.logical_or(terminated, truncated).astype(np.float32)
                 all_rewards[step] = reward
-                all_dones[step]   = done
+                all_dones[step] = done
 
                 ep_reward_buf += reward
                 for i, d in enumerate(done):
                     if d:
-                        ep_rewards_all.append(float(ep_reward_buf[i]))
+                        rewards_per_episode.append(float(ep_reward_buf[i]))
                         ep_reward_buf[i] = 0.0
+                        episodes_completed += 1
 
                 global_step += self.num_envs
 
             # Bootstrap
             with torch.no_grad():
-                next_value = self.policy.get_value(
-                    torch.tensor(obs, dtype=torch.float32).to(device)
+                next_value = policy.get_value(
+                    torch.tensor(obs, dtype=torch.float32, device=device)
                 ).squeeze(-1).cpu().numpy()
 
-            # ── 2. GAE ────────────────────────────────────────────────
+            # ── 2. GAE ──
             advantages, returns = compute_gae(
                 all_rewards, all_values, all_dones, next_value,
-                float(self.config["gamma"]), float(self.config["gae_lambda"])
+                self.gamma, self.gae_lambda,
             )
 
-            b_obs        = torch.tensor(all_obs.reshape(-1, *self.obs_space.shape), dtype=torch.float32).to(device)
-            b_actions    = torch.tensor(all_actions.reshape(-1)).to(device)
-            b_logprobs   = torch.tensor(all_logprobs.reshape(-1), dtype=torch.float32).to(device)
-            b_advantages = torch.tensor(advantages.reshape(-1), dtype=torch.float32).to(device)
-            b_returns    = torch.tensor(returns.reshape(-1), dtype=torch.float32).to(device)
+            b_obs = torch.tensor(all_obs.reshape(-1, *obs_space.shape), dtype=torch.float32, device=device)
+            b_actions = torch.tensor(all_actions.reshape(-1), device=device)
+            b_logprobs = torch.tensor(all_logprobs.reshape(-1), dtype=torch.float32, device=device)
+            b_advantages = torch.tensor(advantages.reshape(-1), dtype=torch.float32, device=device)
+            b_returns = torch.tensor(returns.reshape(-1), dtype=torch.float32, device=device)
             b_advantages = (b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-8)
 
-            # ── 3. Actualización PPO ──────────────────────────────────
-            total_samples     = b_obs.shape[0]
-            actor_loss_accum  = 0.0
+            # ── 3. PPO update ──
+            total_samples = b_obs.shape[0]
+            actor_loss_accum = 0.0
             critic_loss_accum = 0.0
-            entropy_accum     = 0.0
-            n_updates         = 0
+            entropy_accum = 0.0
+            n_updates = 0
 
             for _ in range(self.update_epochs):
                 indices = torch.randperm(total_samples)
                 for start in range(0, total_samples, self.batch_size):
                     idx = indices[start: start + self.batch_size]
 
-                    dist, new_values = self.policy(b_obs[idx])
+                    dist, new_values = policy(b_obs[idx])
                     new_logprobs = dist.log_prob(b_actions[idx])
                     if not self.is_discrete:
                         new_logprobs = new_logprobs.sum(-1)
@@ -312,162 +370,94 @@ class PPOAgent:
                         entropy = entropy.sum(-1)
 
                     ratio = (new_logprobs - b_logprobs[idx]).exp()
-                    adv   = b_advantages[idx]
+                    adv = b_advantages[idx]
                     surr1 = ratio * adv
-                    surr2 = torch.clamp(ratio,
-                                        1 - float(self.config["clip_coef"]),
-                                        1 + float(self.config["clip_coef"])) * adv
+                    surr2 = torch.clamp(ratio, 1 - self.clip_coef, 1 + self.clip_coef) * adv
 
-                    actor_loss   = -torch.min(surr1, surr2).mean()
-                    critic_loss  = nn.functional.mse_loss(new_values.squeeze(-1), b_returns[idx])
-                    entropy_loss = -float(self.config["ent_coef"]) * entropy.mean()
-                    loss = actor_loss + float(self.config["vf_coef"]) * critic_loss + entropy_loss
+                    actor_loss = -torch.min(surr1, surr2).mean()
+                    critic_loss = nn.functional.mse_loss(new_values.squeeze(-1), b_returns[idx])
+                    entropy_loss = -self.ent_coef * entropy.mean()
+                    loss = actor_loss + self.vf_coef * critic_loss + entropy_loss
 
-                    self.optimizer.zero_grad()
+                    optimizer.zero_grad()
                     loss.backward()
-                    nn.utils.clip_grad_norm_(self.policy.parameters(), float(self.config["max_grad_norm"]))
-                    self.optimizer.step()
+                    nn.utils.clip_grad_norm_(policy.parameters(), self.max_grad_norm)
+                    optimizer.step()
 
-                    actor_loss_accum  += actor_loss.item()
+                    actor_loss_accum += actor_loss.item()
                     critic_loss_accum += critic_loss.item()
-                    entropy_accum     += entropy.mean().item()
-                    n_updates         += 1
+                    entropy_accum += entropy.mean().item()
+                    n_updates += 1
 
-            # ── 4. Logging ────────────────────────────────────────────
-            al  = actor_loss_accum  / max(n_updates, 1)
-            cl  = critic_loss_accum / max(n_updates, 1)
-            en  = entropy_accum     / max(n_updates, 1)
-            mr  = float(np.mean(ep_rewards_all[-100:])) if ep_rewards_all else 0.0
-            sps = global_step / (time.time() - start_time)
+            al = actor_loss_accum / max(n_updates, 1)
+            cl = critic_loss_accum / max(n_updates, 1)
+            en = entropy_accum / max(n_updates, 1)
+            actor_losses.append(al)
+            critic_losses.append(cl)
+            entropies.append(en)
 
-            plot_timesteps.append(global_step)
-            plot_actor_loss.append(al)
-            plot_critic_loss.append(cl)
-            plot_entropy.append(en)
+            # ── 4. Logging ──
+            mr = float(np.mean(rewards_per_episode[-100:])) if rewards_per_episode else 0.0
+            sps = global_step / (time.time() - train_start) if time.time() > train_start else 0
+            episode_elapsed = time.time() - episode_start_time
 
-            if update % 5 == 0 or update == 1:
-                print(
-                    f"Update {update:4d}/{total_updates} | step {global_step:8d} | "
-                    f"reward {mr:7.2f} | actor {al:.4f} | critic {cl:.4f} | "
-                    f"ent {en:.3f} | {sps:.0f} sps"
-                )
+            # Use mean of last 100 episode rewards as the "episode reward" for save_model
+            episode_reward = mr
 
-            with open(self.log_path, "a") as f:
-                f.write(f"{update},{global_step},{mr:.4f},{al:.6f},{cl:.6f},{en:.6f},{sps:.1f}\n")
+            print(
+                f"Episode {episode} | MeanReward100: {mr:0.1f} | "
+                f"Actor: {al:.4f} | Critic: {cl:.4f} | Ent: {en:.3f} | "
+                f"Steps: {global_step} | {sps:.0f} sps | "
+                f"Episodes completed: {episodes_completed}"
+            )
 
-            # TensorBoard
-            if self.writer:
-                self.writer.add_scalar("losses/actor_loss",  al,  global_step)
-                self.writer.add_scalar("losses/critic_loss", cl,  global_step)
-                self.writer.add_scalar("losses/entropy",     en,  global_step)
-                self.writer.add_scalar("charts/mean_reward_100ep", mr, global_step)
-                self.writer.add_scalar("charts/sps",         sps, global_step)
-                if ep_rewards_all:
-                    self.writer.add_scalar("charts/episode_reward",
-                                           ep_rewards_all[-1], global_step)
+            if writer:
+                writer.add_scalar("reward/mean_100", mr, global_step)
+                writer.add_scalar("reward/best", best_reward if mr <= best_reward else mr, global_step)
+                writer.add_scalar("losses/actor_loss", al, global_step)
+                writer.add_scalar("losses/critic_loss", cl, global_step)
+                writer.add_scalar("losses/entropy", en, global_step)
+                writer.add_scalar("training/steps_per_second", sps, global_step)
+                if rewards_per_episode:
+                    writer.add_scalar("reward/episode", rewards_per_episode[-1], global_step)
 
-            # ── 5. Checkpoint cada 50 updates ─────────────────────────
-            if update % 50 == 0:
-                self._save_checkpoint(update, global_step)
+            self.save_model(
+                policy, optimizer, episode_reward, episode, best_reward,
+                rewards_per_episode, actor_losses, critic_losses, entropies, global_step,
+            )
+            if episode_reward > best_reward:
+                best_reward = episode_reward
 
-        # Final
-        self._save_checkpoint("final", global_step)
-        _save_plots(self.run_dir, ep_rewards_all,
-                    plot_actor_loss, plot_critic_loss, plot_entropy,
-                    plot_timesteps)
-        if self.writer:
-            self.writer.close()
+            # Update graph every 10 seconds
+            current_time = datetime.now()
+            if current_time - last_graph_update_time > timedelta(seconds=10):
+                save_graph(self.GRAPH_FILE, rewards_per_episode, actor_losses, critic_losses, entropies)
+                last_graph_update_time = current_time
 
-        self.envs.close()
-        print(f"[PPO] Entrenamiento completado. Pasos totales: {global_step:,}")
+    def _eval_loop(self, env, policy, best_eval_reward, reward_file, video_file):
+        for episode in itertools.count():
+            state, _ = env.reset()
+            terminated, truncated = False, False
+            episode_reward = 0.0
 
-    # ------------------------------------------------------------------
-    # EVALUACIÓN
-    # ------------------------------------------------------------------
-    def _eval(self, n_episodes=10, render=True):
-        """
-        Carga el checkpoint final y ejecuta n_episodes con política determinista.
-        """
-        ckpt_path = os.path.join(self.run_dir, "checkpoint_final.pt")
-        if not os.path.exists(ckpt_path):
-            # Buscar el checkpoint numerado más reciente
-            ckpts = sorted([
-                f for f in os.listdir(self.run_dir)
-                if f.startswith("checkpoint_") and f.endswith(".pt")
-            ])
-            if not ckpts:
-                print("[PPO] No se encontró ningún checkpoint. Entrena primero con --train.")
-                self.envs.close()
-                return
-            ckpt_path = os.path.join(self.run_dir, ckpts[-1])
-
-        print(f"[PPO] Cargando checkpoint: {ckpt_path}")
-        ckpt = torch.load(ckpt_path, map_location=device)
-        self.policy.load_state_dict(ckpt["policy"])
-        self.policy.eval()
-        print(f"[PPO] Update {ckpt.get('update', '?')} | "
-              f"step {ckpt.get('global_step', 0):,}")
-
-        # Entorno individual con render
-        self.envs.close()   # cerramos el vec env que ya no necesitamos
-        eval_env = make_env(self.config["env_id"], obs_type="pixel",
-                            render=render, seed=999)
-
-        ep_rewards = []
-        ep_lengths = []
-
-        for ep in range(n_episodes):
-            obs, _ = eval_env.reset()
-            ep_reward = 0.0
-            ep_len    = 0
-            done      = False
-
-            while not done:
-                obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
+            while not terminated and not truncated:
+                obs_t = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
                 with torch.no_grad():
-                    dist, _ = self.policy(obs_t)
-                    # Acción determinista
+                    dist, _ = policy(obs_t)
                     if self.is_discrete:
                         action = dist.probs.argmax(dim=-1).item()
                     else:
                         action = dist.mean.squeeze(0).cpu().numpy()
 
-                obs, reward, terminated, truncated, _ = eval_env.step(action)
-                done       = terminated or truncated
-                ep_reward += reward
-                ep_len    += 1
+                state, reward, terminated, truncated, _ = env.step(action)
+                episode_reward += float(reward)
+                print(f"Episode Reward: {episode_reward:0.1f}, Step Reward: {reward:0.1f}", end="\r")
 
-            ep_rewards.append(ep_reward)
-            ep_lengths.append(ep_len)
-            print(f"  Ep {ep + 1:2d}/{n_episodes} | reward: {ep_reward:7.2f} | length: {ep_len}")
+            print(f"\nEpisode {episode} | Reward: {episode_reward:.1f} | Best: {best_eval_reward:.1f}")
 
-        eval_env.close()
-        print(f"\n[PPO] Media: {np.mean(ep_rewards):.2f} ± {np.std(ep_rewards):.2f} | "
-              f"Length media: {np.mean(ep_lengths):.1f}")
-
-    # ------------------------------------------------------------------
-    # PUNTO DE ENTRADA PÚBLICO
-    # ------------------------------------------------------------------
-    def run(self, is_training=True, render=True):
-        """
-        --train  → is_training=True  → entrena y guarda checkpoints + gráficas.
-        (nada)   → is_training=False → carga checkpoint y evalúa con render.
-        """
-        # Propiedad de conveniencia para no repetir isinstance en todo el código
-        self.is_discrete = isinstance(self.action_space, gym.spaces.Discrete)
-
-        if is_training:
-            self._train()
-        else:
-            self._eval(n_episodes=10, render=render)
-
-    # ------------------------------------------------------------------
-    def _save_checkpoint(self, tag, global_step):
-        path = os.path.join(self.run_dir, f"checkpoint_{tag}.pt")
-        torch.save({
-            "update":      tag,
-            "global_step": global_step,
-            "policy":      self.policy.state_dict(),
-            "optimizer":   self.optimizer.state_dict(),
-        }, path)
-        print(f"  → Checkpoint: {path}")
+            if hasattr(env, "save_video") and episode_reward > best_eval_reward:
+                best_eval_reward = episode_reward
+                env.save_video(video_file)
+                with open(reward_file, "w") as f:
+                    f.write(f"{best_eval_reward}\n")
+                print(f"  -> New best! Video saved to {video_file}")

@@ -3,10 +3,9 @@ ppo_cartpole_pixel:
   env_id: CartPole-v1
   obs: pixel
   num_envs: 8
-  total_timesteps: 500000
   rollout_steps: 128
   update_epochs: 4
-  batch_size: 256 # total_samples = rollout_steps * num_envs = 1024, batch=256 → 4 minibatches
+  batch_size: 256
   gamma: 0.99
   gae_lambda: 0.95
   clip_coef: 0.2
@@ -20,10 +19,9 @@ ppo_walker2d_pixel:
   env_id: Walker2d-v5
   obs: pixel
   num_envs: 4
-  total_timesteps: 2000000 # Walker2d necesita más timesteps para aprender
   rollout_steps: 256
   update_epochs: 10
-  batch_size: 256 # total_samples = 256 * 4 = 1024
+  batch_size: 256
   gamma: 0.99
   gae_lambda: 0.95
   clip_coef: 0.2
@@ -31,19 +29,3 @@ ppo_walker2d_pixel:
   ent_coef: 0.0
   learning_rate: 3e-4
   max_grad_norm: 0.5
-
-sac_walker2d_pixel:
-  algo: sac
-  env_id: Walker2d-v5
-  obs: pixel
-  num_envs: 1
-  total_timesteps: 1000000
-  replay_buffer_size: 100000
-  batch_size: 256
-  gamma: 0.99
-  tau: 0.005
-  actor_lr: 3e-4
-  critic_lr: 3e-4
-  alpha: auto
-  learning_starts: 5000 # pasos antes de empezar a entrenar
-  update_every: 1 # actualizar cada N pasos

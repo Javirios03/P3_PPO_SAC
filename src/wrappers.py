@@ -2,33 +2,23 @@ import cv2
 import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
-from gymnasium.wrappers import (
-    ResizeObservation,
-    FrameStackObservation,
-    AddRenderObservation,
-)
+from gymnasium.wrappers import FrameStackObservation
 
 
 # ---------------------------------------------------------------------------
 # Discretización de acciones continuas
 # ---------------------------------------------------------------------------
 class DiscretizedActionWrapper(gym.ActionWrapper):
-    """
-    Convierte un espacio de acciones continuo Box en uno discreto.
-    Acción 0 = vector de ceros ("no hacer nada").
-    Para cada dimensión, añade bins-1 acciones (las que no son 0).
-    Ejemplo: Walker2d (6 dims) con bins=3 → 1 + 6*2 = 13 acciones.
-    """
     def __init__(self, env, bins=3):
         super().__init__(env)
         assert isinstance(env.action_space, gym.spaces.Box), \
             "DiscretizedActionWrapper requiere espacio de acciones Box."
 
-        low    = self.env.action_space.low
-        high   = self.env.action_space.high
+        low = self.env.action_space.low
+        high = self.env.action_space.high
         n_dims = self.env.action_space.shape[0]
 
-        actions = [np.zeros(n_dims, dtype=np.float32)]  # acción base: ceros
+        actions = [np.zeros(n_dims, dtype=np.float32)]
         for i in range(n_dims):
             values = np.linspace(low[i], high[i], bins)
             for v in values:
@@ -39,7 +29,7 @@ class DiscretizedActionWrapper(gym.ActionWrapper):
 
         self.actions_grid = np.array(actions, dtype=np.float32)
         self.action_space = Discrete(len(self.actions_grid))
-        print(f"DiscretizedActionWrapper: {len(self.actions_grid)} acciones discretas.")
+        print(f"DiscretizedActionWrapper: {len(self.actions_grid)} discrete actions.")
 
     def action(self, action_index):
         idx = int(action_index.item() if hasattr(action_index, "item") else action_index)
@@ -47,32 +37,12 @@ class DiscretizedActionWrapper(gym.ActionWrapper):
 
 
 # ---------------------------------------------------------------------------
-# Conversión a escala de grises con OpenCV
-# ---------------------------------------------------------------------------
-class GrayscaleWrapper(gym.ObservationWrapper):
-    """Convierte observaciones RGB a escala de grises."""
-    def __init__(self, env):
-        super().__init__(env)
-        h, w = self.observation_space.shape[:2]
-        self.observation_space = Box(low=0, high=255, shape=(h, w), dtype=np.uint8)
-
-    def observation(self, obs):
-        return cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
-
-
-# ---------------------------------------------------------------------------
-# Wrapper clave: obtiene el render, lo redimensiona y convierte a gris
+# Pixel observation: render → grayscale → resize
 # ---------------------------------------------------------------------------
 class PixelObservationWrapper(gym.ObservationWrapper):
-    """
-    Reemplaza la observación del entorno por un frame renderizado en gris.
-    El entorno debe estar creado con render_mode='rgb_array'.
-    El frame se redimensiona a obs_size x obs_size.
+    """Replace obs with grayscale render. Works for envs that don't support
+    width/height in gym.make (e.g. CartPole)."""
 
-    Compatible con:
-      - Walker2d-v5 (renderiza directamente a 84x84 si se pasa width/height)
-      - CartPole-v1 (renderiza a resolución por defecto, luego resize)
-    """
     def __init__(self, env, obs_size=84):
         super().__init__(env)
         self.obs_size = obs_size
@@ -81,10 +51,9 @@ class PixelObservationWrapper(gym.ObservationWrapper):
         )
 
     def observation(self, obs):
-        frame = self.env.render()          # RGB np.array (H, W, 3)
+        frame = self.env.render()
         if frame is None:
             return np.zeros((self.obs_size, self.obs_size), dtype=np.uint8)
-        # Resize si hace falta
         if frame.shape[0] != self.obs_size or frame.shape[1] != self.obs_size:
             frame = cv2.resize(frame, (self.obs_size, self.obs_size),
                                interpolation=cv2.INTER_AREA)
@@ -92,43 +61,152 @@ class PixelObservationWrapper(gym.ObservationWrapper):
 
 
 # ---------------------------------------------------------------------------
-# Visualización en tiempo real con OpenCV (solo para eval)
+# RenderGrayscaleWrapper (for MuJoCo envs that support width/height)
 # ---------------------------------------------------------------------------
-class OpenCVRenderWrapper(gym.Wrapper):
-    """Muestra el render en ventana flotante OpenCV (usa solo para evaluación)."""
-    def __init__(self, env, window_name="Preview"):
+class RenderGrayscaleWrapper(gym.ObservationWrapper):
+    """Replace obs with grayscale render in a single wrapper.
+    Expects env created with render_mode='rgb_array' and width/height
+    already set to target resolution so no resize is needed."""
+
+    def __init__(self, env, obs_size=84):
         super().__init__(env)
-        self.window_name = window_name
+        self._obs_size = obs_size
+        self.observation_space = Box(
+            low=0, high=255, shape=(obs_size, obs_size), dtype=np.uint8
+        )
+
+    def observation(self, obs):
+        frame = self.env.render()
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        if gray.shape != (self._obs_size, self._obs_size):
+            gray = cv2.resize(
+                gray, (self._obs_size, self._obs_size), interpolation=cv2.INTER_AREA
+            )
+        return gray
+
+
+# ---------------------------------------------------------------------------
+# EvalRenderWrapper with video recording
+# ---------------------------------------------------------------------------
+class EvalRenderWrapper(gym.Wrapper):
+    """High-quality display for eval with video recording support."""
+
+    def __init__(self, env, display_size=480, window_name="Eval"):
+        super().__init__(env)
+        self._display_size = display_size
+        self._window_name = window_name
+        self._mj_renderer = None
+        self._camera = None
+        self._episode_frames = []
+        self._is_mujoco = hasattr(env.unwrapped, "model") and hasattr(
+            env.unwrapped, "data"
+        )
+
+    def _init_mj_renderer(self):
+        if self._mj_renderer is not None:
+            return
+        import mujoco
+
+        unwrapped = self.env.unwrapped
+        unwrapped.model.vis.global_.offwidth = max(
+            unwrapped.model.vis.global_.offwidth, self._display_size
+        )
+        unwrapped.model.vis.global_.offheight = max(
+            unwrapped.model.vis.global_.offheight, self._display_size
+        )
+        self._mj_renderer = mujoco.Renderer(
+            unwrapped.model,
+            height=self._display_size,
+            width=self._display_size,
+        )
+        mj_rend = getattr(unwrapped, "mujoco_renderer", None)
+        if mj_rend is not None and getattr(mj_rend, "viewer", None) is None:
+            mj_rend.render("rgb_array")
+        viewer = getattr(mj_rend, "viewer", None) if mj_rend else None
+        if viewer is not None and hasattr(viewer, "cam"):
+            src = viewer.cam
+            self._camera = mujoco.MjvCamera()
+            self._camera.type = src.type
+            self._camera.fixedcamid = src.fixedcamid
+            self._camera.trackbodyid = src.trackbodyid
+            self._camera.distance = src.distance
+            self._camera.azimuth = src.azimuth
+            self._camera.elevation = src.elevation
+            self._camera.lookat[:] = src.lookat
+        else:
+            self._camera = -1
+
+    def _get_display_frame(self):
+        if self._is_mujoco:
+            self._init_mj_renderer()
+            self._mj_renderer.update_scene(
+                self.env.unwrapped.data, camera=self._camera
+            )
+            return self._mj_renderer.render()
+        frame = self.env.render()
+        if frame is not None:
+            h, w = frame.shape[:2]
+            if h != self._display_size or w != self._display_size:
+                frame = cv2.resize(
+                    frame,
+                    (self._display_size, self._display_size),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+        return frame
+
+    def _show(self, frame):
+        if frame is None:
+            return
+        img_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        cv2.imshow(self._window_name, img_bgr)
+        cv2.waitKey(1)
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        img = self.env.render()
-        if img is not None:
-            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            img_bgr = cv2.resize(img_bgr, (480, 480), interpolation=cv2.INTER_NEAREST)
-            cv2.imshow(self.window_name, img_bgr)
-            cv2.waitKey(1)
+        frame = self._get_display_frame()
+        if frame is not None:
+            self._episode_frames.append(frame)
+        self._show(frame)
         return obs, reward, terminated, truncated, info
 
+    def reset(self, **kwargs):
+        self._episode_frames = []
+        result = self.env.reset(**kwargs)
+        frame = self._get_display_frame()
+        if frame is not None:
+            self._episode_frames.append(frame)
+        self._show(frame)
+        return result
+
+    def get_episode_frames(self):
+        return self._episode_frames
+
+    def save_video(self, path, fps=None):
+        """Save recorded episode frames as H.264 MP4 via imageio-ffmpeg."""
+        if not self._episode_frames:
+            return
+        if fps is None:
+            fps = self.metadata.get("render_fps", 30)
+        import imageio.v3 as iio
+        iio.imwrite(path, self._episode_frames, fps=fps, codec="libx264")
+
     def close(self):
+        if self._mj_renderer is not None:
+            self._mj_renderer.close()
+            self._mj_renderer = None
         cv2.destroyAllWindows()
         return self.env.close()
 
 
 # ---------------------------------------------------------------------------
-# Reward shaping para Walker2d
+# Reward shaping for Walker2d
 # ---------------------------------------------------------------------------
 class WalkerRewardWrapper(gym.RewardWrapper):
-    """
-    Penaliza el ángulo del torso, las rodillas hiperestendidas y la asimetría
-    de marcha. Mantiene el reward de avance como señal principal.
-    """
     def __init__(self, env, torso_w=1.0, knee_w=0.3, sym_w=0.1):
         super().__init__(env)
         self.torso_w = torso_w
-        self.knee_w  = knee_w
-        self.sym_w   = sym_w
-        # Guardamos la última obs para el reward shaping
+        self.knee_w = knee_w
+        self.sym_w = sym_w
         self._last_obs = None
 
     def step(self, action):
@@ -140,36 +218,27 @@ class WalkerRewardWrapper(gym.RewardWrapper):
         if self._last_obs is None:
             return reward
         obs = self._last_obs
-        # Índices del espacio de observación de Walker2d-v5:
-        # 0: z del torso, 1: ángulo torso, 2: muslo izq, 3: pierna izq,
-        # 4: pie izq, 5: muslo der, 6: pierna der, 7: pie der, ...
-        torso_angle  = obs[1]
-        left_knee    = obs[3]
-        right_knee   = obs[6]
-        left_thigh   = obs[2]
-        right_thigh  = obs[5]
-
+        torso_angle = obs[1]
+        left_knee = obs[3]
+        right_knee = obs[6]
+        left_thigh = obs[2]
+        right_thigh = obs[5]
         torso_penalty = self.torso_w * torso_angle ** 2
-        knee_penalty  = self.knee_w  * (left_knee ** 2 + right_knee ** 2)
-        sym_penalty   = self.sym_w   * (
-            (left_knee  - right_knee)  ** 2 +
+        knee_penalty = self.knee_w * (left_knee ** 2 + right_knee ** 2)
+        sym_penalty = self.sym_w * (
+            (left_knee - right_knee) ** 2 +
             (left_thigh - right_thigh) ** 2
         )
         return reward - torso_penalty - knee_penalty - sym_penalty
 
 
 # ---------------------------------------------------------------------------
-# Constructores de entorno
+# Environment constructors
 # ---------------------------------------------------------------------------
 def make_pixel_env(env_id, render=False, seed=42):
-    """
-    Pipeline para observaciones en píxeles (gris, 84×84, stack de 4 frames).
-    Estructura del stack resultante: (4, 84, 84) — listo para CNN.
-    """
     obs_size = 84
 
     if "Walker2d" in env_id:
-        # MuJoCo renderiza directamente al tamaño pedido → sin resize posterior
         env = gym.make(
             env_id,
             render_mode="rgb_array",
@@ -179,11 +248,10 @@ def make_pixel_env(env_id, render=False, seed=42):
             max_episode_steps=2500,
         )
         env = WalkerRewardWrapper(env)
-
+        env = RenderGrayscaleWrapper(env, obs_size=obs_size)
     elif "CartPole" in env_id:
-        # CartPole no acepta width/height → render a resolución nativa, luego resize
         env = gym.make(env_id, render_mode="rgb_array")
-
+        env = PixelObservationWrapper(env, obs_size=obs_size)
     elif "Hopper" in env_id or "HalfCheetah" in env_id:
         env = gym.make(
             env_id,
@@ -191,21 +259,18 @@ def make_pixel_env(env_id, render=False, seed=42):
             width=obs_size,
             height=obs_size,
         )
+        env = RenderGrayscaleWrapper(env, obs_size=obs_size)
     else:
         env = gym.make(env_id, render_mode="rgb_array")
+        env = PixelObservationWrapper(env, obs_size=obs_size)
 
-    # Wrapper principal: render → gris → (84, 84)
-    env = PixelObservationWrapper(env, obs_size=obs_size)
-
-    # Discretización para entornos con acción continua
     if isinstance(env.action_space, Box):
         env = DiscretizedActionWrapper(env, bins=3)
 
-    # Stack de 4 frames: (84, 84) × 4 → (4, 84, 84)
     env = FrameStackObservation(env, stack_size=4)
 
     if render:
-        env = OpenCVRenderWrapper(env)
+        env = EvalRenderWrapper(env)
 
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
@@ -213,7 +278,6 @@ def make_pixel_env(env_id, render=False, seed=42):
 
 
 def make_state_env(env_id, render=False, seed=42):
-    """Entorno con observación de estado vectorial."""
     if "Walker2d" in env_id:
         env = gym.make(
             env_id,
@@ -239,14 +303,11 @@ def make_env(env_id, obs_type, render=False, seed=42):
     elif obs_type == "state":
         return make_state_env(env_id, render, seed)
     else:
-        raise ValueError(f"obs_type desconocido: {obs_type}")
+        raise ValueError(f"Unsupported obs_type: {obs_type}")
 
 
 def make_vec_env(env_id, obs_type, num_envs, seed=42):
-    """
-    Crea un entorno vectorizado con num_envs entornos en paralelo.
-    Usa SyncVectorEnv (más seguro con MuJoCo en múltiples procesos).
-    """
+    """Create a vectorized environment with num_envs parallel envs."""
     def _make_thunk(idx):
         def _thunk():
             return make_env(env_id, obs_type, render=False, seed=seed + idx)
