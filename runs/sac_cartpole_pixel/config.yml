@@ -1,0 +1,15 @@
+algo: sac
+alpha: 0.2
+alpha_lr: 1e-4
+auto_alpha: true
+batch_size: 256
+buffer_size: 100000
+env_id: CartPole-v1
+gamma: 0.99
+learning_rate: 3e-4
+learning_starts: 1000
+max_grad_norm: 10.0
+obs: pixel
+target_entropy_coef: 0.5
+tau: 0.005
+train_freq: 4

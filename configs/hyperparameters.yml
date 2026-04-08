@@ -34,3 +34,88 @@ ppo_walker2d_pixel:
     forward_reward_weight: 0.5
     ctrl_cost_weight: 0.1
     healthy_reward: 1.25
+  
+ppo_hopper_pixel:
+  algo: ppo
+  env_id: Hopper-v5
+  obs: pixel
+  num_envs: 1
+  rollout_steps: 2048
+  update_epochs: 10
+  batch_size: 1024
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  vf_coef: 0.2
+  ent_coef: 0.001
+  learning_rate: 1e-4
+  max_grad_norm: 0.5
+  env_kwargs:
+    max_episode_steps: 20000
+    forward_reward_weight: 0.5
+    ctrl_cost_weight: 0.1
+    healthy_reward: 1.25
+
+sac_walker2d_pixel:
+  algo: sac
+  env_id: Walker2d-v5
+  obs: pixel
+  buffer_size: 200000
+  batch_size: 256
+  learning_rate: 3e-4
+  gamma: 0.99
+  tau: 0.005
+  alpha: 0.2
+  auto_alpha: true
+  learning_starts: 5000
+  train_freq: 1
+  max_grad_norm: 10.0
+  target_entropy_coef: 0.70
+  alpha_lr: 1e-4
+  env_kwargs:
+    max_episode_steps: 20000
+    forward_reward_weight: 0.5
+    ctrl_cost_weight: 0.1
+    healthy_reward: 1.25
+
+sac_hopper_pixel:
+  algo: sac
+  env_id: Hopper-v5
+  obs: pixel
+  buffer_size: 200000
+  batch_size: 256
+  learning_rate: 3e-4
+  gamma: 0.99
+  tau: 0.005
+  alpha: 0.2
+  auto_alpha: true
+  learning_starts: 5000
+  train_freq: 8
+  max_grad_norm: 10.0
+  target_entropy_coef: 0.70
+  alpha_lr: 1e-4
+  env_kwargs:
+    max_episode_steps: 20000
+    # forward_reward_weight: 0.5
+    forward_reward_weight: 0.35
+    # ctrl_cost_weight: 0.1
+    ctrl_cost_weight: 0.025
+    # healthy_reward: 1.25
+    healthy_reward: 1.3
+
+sac_cartpole_pixel:
+  algo: sac
+  env_id: CartPole-v1
+  obs: pixel
+  buffer_size: 100000
+  batch_size: 256
+  learning_rate: 3e-4
+  gamma: 0.99
+  tau: 0.005
+  alpha: 0.2
+  auto_alpha: true
+  learning_starts: 1000
+  train_freq: 4
+  max_grad_norm: 10.0
+  target_entropy_coef: 0.50
+  alpha_lr: 1e-4
