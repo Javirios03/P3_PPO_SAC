@@ -253,13 +253,13 @@ class SACAgent:
         if self.auto_alpha:
             with torch.no_grad():
                 entropy = -(probs * log_probs_all).sum(dim=1).mean()
-            alpha_loss_t = -log_alpha * (entropy - self.target_entropy)
+            alpha_loss_t = log_alpha.exp() * (entropy - self.target_entropy)
             alpha_opt.zero_grad()
             alpha_loss_t.backward()
             alpha_opt.step()
             alpha_loss = alpha_loss_t.item()
             with torch.no_grad():
-                log_alpha.clamp_(min=np.log(0.01), max=np.log(1.0))
+                log_alpha.clamp_(min=np.log(0.01), max=np.log(5.0))
 
         self._soft_update(critic, critic_target, self.tau)
 
