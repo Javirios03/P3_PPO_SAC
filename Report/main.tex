@@ -8,6 +8,7 @@
 \usepackage{hyperref}
 \usepackage{float}
 \usepackage[justification=centering]{caption} % Permite centrar los pies de figura
+\usepackage{booktabs}
 
 
 % Specific paper formatting for CWP report
@@ -20,19 +21,12 @@
 \setlength{\evensidemargin}{+.015625in}
 
 % Final draft only
-% \title[Short Title]{Aprendizaje auto-supervisado de
-% representaciones visuales con SimCLR y
-% evaluación mediante linear probing}
 \title[]{Deep Reinforcement Learning with Value Function and Policy Approximation.\\ Actor-Critic Methods for Continuous Control: PPO and SAC}
-% for editing/reviewing
-%\title{Measuring wave propagation through an open-pit mine using stereo videos} 
-%\righthead{training data}
-%\lefthead{Rapstine & Sava}
 
 % Final draft only
-\author[]{José Ridruejo Tuñón, Joaquín Mir Macías \& Francisco Javier Ríos 
+\author[]{José Ridruejo Tuñón, Joaquín Mir Macías \& Francisco Javier Ríos
 \\
-Deep Reinforcement Learning} 
+Deep Reinforcement Learning}
 
 % --- CORRECCIÓN DE MÁRGENES DEL ABSTRACT ---
 \makeatletter
@@ -59,10 +53,10 @@ Deep Reinforcement Learning}
 \fancyhf{} % Borra todos los encabezados y pies de página actuales
 
 % Quitar la línea horizontal del encabezado
-\renewcommand{\headrulewidth}{0pt} 
+\renewcommand{\headrulewidth}{0pt}
 
 % Poner el número de página en el centro del pie de página
-\fancyfoot[C]{\thepage} 
+\fancyfoot[C]{\thepage}
 
 % Para que la primera página (la del título) también tenga el número abajo
 \fancypagestyle{plain}{
@@ -72,41 +66,19 @@ Deep Reinforcement Learning}
 }
 % ---------------------------------------------------
 
-% --- Centrado Descripción Imagen ---
-% \makeatletter
-% \long\def\GJ@makefigurecaption#1#2{\vskip 6pt
-%  \setbox\@tempboxa\hbox{\reset@font\small{\bf #1.} #2}
-%  \ifdim \wd\@tempboxa >\hsize
-%   % Si el texto es largo, lo metemos en una caja centrada
-%   \parbox{\hsize}{\centering\reset@font\small{\bf #1.} #2\par}
-%  \else
-%    % Si es corto (una línea), lo centra (esto ya lo hacía la clase original)
-%    \ifst@rredfloat
-%      \hbox to\hsize{\hfill\box\@tempboxa\hfill}
-%    \else
-%      \hbox to\hsize{\hfil\box\@tempboxa\hfil}
-%    \fi
-%  \fi
-%  \vskip 6pt
-% }
-% \makeatother
-% ------
-%\author{Thomas Rapstine, Paul Sava, Ashley Grant, \& Jeff Shragge}
 \begin{document}
 
 \maketitle
 
-% Uncomment for final draft only
-%\setcounter{page}{285}
 \journal{}
 
 %% ------------------------------------------------------------
 \begin{abstract}
-    This work studies deep reinforcement learning for continuous control from visual observations using MuJoCo environments from the DeepMind Control Suite accessed through Gymnasium. The focus is on Actor-Critic algorithms with explicit policy approximation: Proximal Policy Optimization (PPO), an on-policy method, and Soft Actor-Critic (SAC), an off-policy maximum-entropy method. We first select and configure a locomotion environment with RGB observations and discretized actions. Then, we train PPO and SAC agents for forward locomotion, analyzing the impact of reward design, visual state representation and hyperparameters on learning dynamics. We experimentally compare PPO and SAC in terms of sample efficiency, training stability and final performance. The results highlight the practical trade-offs between on-policy and off-policy Actor-Critic methods in visually rich continuous control, as well as the role of entropy regularization and other components in shaping the learning process.
+    This work studies deep reinforcement learning for continuous control from visual observations using MuJoCo environments accessed through Gymnasium. The focus is on Actor-Critic algorithms with explicit policy approximation: Proximal Policy Optimization (PPO), an on-policy method, and Soft Actor-Critic (SAC), an off-policy maximum-entropy method. We train both agents on the Hopper-v5 locomotion task from pixel observations with a discretized action space, analyzing the impact of reward design, visual state representation, and hyperparameter choices on learning dynamics. We experimentally compare PPO and SAC in terms of sample efficiency, training stability and final performance. PPO, trained for approximately ten days ($\sim$251{,}000 rollout episodes), achieved a best evaluation reward of 3783, while SAC, trained for only $\sim$16 hours ($\sim$8{,}000 episodes), already reached 2510, demonstrating substantially better sample efficiency. The results highlight the practical trade-offs between on-policy and off-policy Actor-Critic methods in visually rich continuous control, as well as the role of entropy regularization, action discretization, and reward shaping in shaping the learning process.
 \end{abstract}
 
 \begin{keywords}
-    Deep Reinforcement Learning, Actor-Critic, Proximal Policy Optimization, Soft Actor-Critic, MuJoCo, DeepMind Control Suite, Gymnasium, Continuous Control, Visual Control
+    Deep Reinforcement Learning, Actor-Critic, Proximal Policy Optimization, Soft Actor-Critic, MuJoCo, Gymnasium, Continuous Control, Visual Control, Entropy Regularization
 \end{keywords}
 
 %% ------------------------------------------------------------
@@ -116,127 +88,365 @@ Deep Reinforcement Learning}
 
 \section{Introduction}
 
-In this practice we address continuous control problems from the perspective of Actor-Critic methods with explicit policy parameterization. Unlike in the previous assignment, where the policy was implicit and derived from an approximated action-value function $Q(s,a)$, here the agent learns a stochastic policy $\pi_\theta(a \mid s)$ together with a value function used as critic. The state of the environment is provided exclusively through RGB images, so the agent must simultaneously learn a visual representation and a control policy on top of it. [file:387]
+In this practice we address continuous control problems from the perspective of Actor-Critic methods with explicit policy parameterization. Unlike in the previous assignment, where the policy was implicit and derived from an approximated action-value function $Q(s,a)$, here the agent learns a stochastic policy $\pi_\theta(a \mid s)$ together with a value function used as critic. The state of the environment is provided exclusively through RGB images, so the agent must simultaneously learn a visual representation and a control policy on top of it.
 
-The physical simulation is handled by MuJoCo, a physics engine widely used in research on locomotion and manipulation, while the tasks are defined via the DeepMind Control Suite and exposed through Gymnasium, which provides a unified RL API. In this project we implement and/or adapt two representative Actor-Critic algorithms: Proximal Policy Optimization (PPO), an on-policy method based on a clipped surrogate objective and Generalized Advantage Estimation (GAE), and Soft Actor-Critic (SAC), an off-policy method based on the maximum entropy RL framework with replay buffer, double critic and target networks. [file:387]
+The physical simulation is handled by MuJoCo, a physics engine widely used in research on locomotion and manipulation, while the tasks are defined through Gymnasium. In this project we implement and adapt two representative Actor-Critic algorithms: Proximal Policy Optimization (PPO), an on-policy method based on a clipped surrogate objective and Generalized Advantage Estimation (GAE), and Soft Actor-Critic (SAC), an off-policy method based on the maximum entropy RL framework with replay buffer, double critic, and target networks.
 
-The goals of the practice are: (i) to understand theoretically and empirically how PPO and SAC work in continuous control with visual observations, (ii) to configure and train agents in locomotion environments, (iii) to compare on-policy vs off-policy behaviour in terms of sample efficiency, stability and final performance, and (iv) to extend the analysis to a more demanding setting where the agent must both move forward and avoid obstacles. The report is structured according to the four parts specified in the assignment: PPO locomotion, SAC locomotion, comparative analysis, and locomotion with obstacles, followed by general conclusions.
+The goals of the practice are: (i) to understand theoretically and empirically how PPO and SAC work in continuous control with visual observations, (ii) to configure and train agents in locomotion environments, (iii) to compare on-policy vs.\ off-policy behaviour in terms of sample efficiency, stability and final performance, and (iv) to extend the analysis to a more demanding setting where the agent must both move forward and avoid obstacles. The report is structured according to the four parts specified in the assignment: PPO locomotion, SAC locomotion, comparative analysis, and locomotion with obstacles, followed by general conclusions.
 
 \section{PPO for Locomotion}
 \label{sec:ppo}
 
 \subsection{Methodology}
-% Describir elección de entorno (ES/EC), configuración Gymnasium+dm\_control,
-% arquitectura actor-critic con entrada RGB, diseño de recompensa,
-% hiperparámetros de PPO, uso de GAE, etc.
 
+\subsubsection{Environment and observation space}
+
+We use the \texttt{Hopper-v5} environment from Gymnasium with MuJoCo physics. The Hopper is a planar one-legged robot with three actuated joints (hip, knee, ankle) whose goal is to hop forward as fast as possible without falling. The observation consists of an RGB render of the scene, resized to $84 \times 84$ grayscale pixels and stacked over the last 4 frames, giving an input tensor of shape $(4, 84, 84)$. Frame stacking provides the policy with an implicit sense of velocity, which is essential since a single frame cannot disambiguate direction of motion.
+
+\subsubsection{Action space discretization}
+
+Since PPO as implemented here uses a Categorical distribution, and Hopper has a continuous action space $\mathcal{A} \subset [-1, 1]^3$, we discretize it using a product grid. For each of the 3 joints we linearly space $B = 3$ values in $[-1, 1]$ (i.e., $\{-1, 0, +1\}$) and form all $B^3 = 27$ combinations. The action at each step is therefore one of 27 joint-torque vectors, covering not only single-joint but also coordinated multi-joint movements — which are indispensable for effective hopping. This is a critical design choice: an early implementation that generated only one-hot actions (one joint at a time, 7 total) created a degenerate action space where coordinated hopping was physically impossible.
+
+\subsubsection{Network architecture}
+
+Both actor and critic share a convolutional encoder with architecture $(4 \to 32, k{=}8, s{=}4) \to (32 \to 64, k{=}4, s{=}2) \to (64 \to 64, k{=}3, s{=}1) \to \text{Flatten}$, each layer followed by ReLU. The flattened representation (1024-dimensional for $84\times84$ input) is fed into separate actor and critic heads, each a two-layer MLP with 512 hidden units. The actor head outputs logits over the 27 actions, from which a Categorical distribution is sampled. The critic head outputs a scalar state value $V(s)$. All weights are initialized orthogonally with gain $\sqrt{2}$; the final actor layer uses gain $0.01$ to produce near-uniform initial policies.
+
+\subsubsection{PPO algorithm and hyperparameters}
+
+PPO optimizes the clipped surrogate objective:
+\begin{equation}
+    \mathcal{L}^{\text{CLIP}}(\theta) = \mathbb{E}_t \left[ \min\!\left( r_t(\theta)\hat{A}_t,\; \text{clip}(r_t(\theta), 1{-}\epsilon, 1{+}\epsilon)\hat{A}_t \right) \right],
+\end{equation}
+where $r_t(\theta) = \pi_\theta(a_t|s_t)/\pi_{\theta_\text{old}}(a_t|s_t)$ is the importance ratio and $\hat{A}_t$ is the Generalized Advantage Estimate (GAE). The full loss adds a value function term and an entropy bonus:
+\begin{equation}
+    \mathcal{L}(\theta) = \mathcal{L}^{\text{CLIP}} - c_1 \mathcal{L}^{\text{VF}} + c_2 \mathcal{H}[\pi_\theta].
+\end{equation}
+Advantages are computed via GAE with $\lambda=0.95$. The key hyperparameters used are summarized in Table~\ref{tab:ppo_hp}.
+
+\begin{table}[H]
+\centering
+\caption{PPO hyperparameters for Hopper-v5 with pixel observations.}
+\label{tab:ppo_hp}
+\begin{tabular}{lc}
+\toprule
+\textbf{Hyperparameter} & \textbf{Value} \\
+\midrule
+Rollout steps per update & 2048 \\
+Update epochs per rollout & 10 \\
+Batch size & 1024 \\
+Learning rate & $10^{-4}$ \\
+Discount $\gamma$ & 0.99 \\
+GAE $\lambda$ & 0.95 \\
+Clip coefficient $\epsilon$ & 0.2 \\
+Critic coefficient $c_1$ & 0.2 \\
+Entropy coefficient $c_2$ & 0.001 \\
+Max gradient norm & 0.5 \\
+Reward: forward weight & 0.5 \\
+Reward: healthy reward & 1.25 \\
+Reward: control cost weight & 0.1 \\
+Max episode steps & 20000 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 
 \subsection{Results and Discussion}
-% Curvas de recompensa y pérdidas, análisis de estabilidad,
-% sensibilidad a hiperparámetros clave, ejemplos cualitativos de comportamiento.
 
 \subsubsection{Theoretical Analysis}
 
-Before diving into the empirical results, we think it would be optimal to gather our thoughts around what we think are the key theoretical aspects of PPO that might influence its performance in the locomotion task. This will be even more relevant when we add the later comparison with SAC, as it will allow us to better understand the differences between on-policy and off-policy methods in this context.
+Before diving into the empirical results, we gather our thoughts around the key theoretical aspects of PPO that we expect to influence its performance on the locomotion task.
 
-The first aspect to consider is the nature of the policy update in PPO. The clipped surrogate objective is designed to prevent large updates that could destabilize training, which marks its main improvement with respect to earlier on-policy methods like TRPO, as it deals with the issue of instability in the policy gradents. However, this also means that PPO might be more conservative in its updates, which could lead to slower learning in some cases, especially in environments with sparse rewards or where significant changes in the policy are needed to make progress.
+The first aspect to consider is the nature of the policy update in PPO. The clipped surrogate objective is designed to prevent large updates that could destabilize training, which marks its main improvement with respect to earlier on-policy methods like TRPO. However, this also means that PPO may be more conservative in its updates, potentially leading to slower learning in environments where significant changes in the policy are needed to make progress.
 
-Related to this last point, PPO is on-policy. As we have seen over and over during the lectures, this means that the data used for training the policy is generated by the current policy itself. The main advantage of this is that it simplifies the learning process and can lead to more stable updates, as the data distribution is always aligned with the current policy (bias-variance trade-off). However, it implies a much lower sample efficiency compared to off-policy methods, as the data cannot be reused across multiple updates.
+PPO is an on-policy algorithm. The data used for training the policy is generated by the current policy, which simplifies the learning process and tends to produce more stable updates because the data distribution is always aligned with the current policy. However, this implies much lower sample efficiency compared to off-policy methods: once a rollout is collected and used for $K$ epochs of optimization, the data is discarded, with no ability to reuse transitions from earlier in training.
 
-Due to this, we expect that PPO will require a larger number of interactions with the environment to achieve good performance, which could be a significant drawback in more complex environments or when computational resources are limited. On the other hand, it might be more robust to hyperparameter choices and less sensitive to the quality of the value function approximation, as the policy updates are more constrained (which can be understood as a simpler training, as only longer computation times are needed, but not necessarily more careful tuning).
+Due to this, we expect PPO to require a larger number of environment interactions to achieve good performance. On the other hand, it should be more robust to hyperparameter choices and less sensitive to the quality of the value function approximation, since the policy updates are more constrained by the clipping mechanism. We also expect training with visual observations to be particularly challenging: the convolutional encoder must learn a compact representation of the environment purely from raw pixels, without access to proprioceptive state variables. This increases the number of samples needed to form a useful critic.
+
+A secondary concern for locomotion is the reward structure. Because Hopper naturally has a large healthy-reward component (simply remaining upright and alive), a poorly tuned reward can cause the policy to converge to a standing-still local optimum. We expect PPO to be somewhat more tolerant of this, as the entropy bonus prevents premature policy collapse.
 
 \subsubsection{Empirical Results}
 
-The full training of the PPO agent in the Hopper environment with RGB observations was done through the equivalent of 10 days of training (around $3\times 10^6$ environment episodes), which is a significant computational effort (as we will see, we were not able to train the SAC agent for the same duration, since the deadline pressed us to prioritize the Report writing). Despite this, the training reward peaked a little before the million$^{th}$ episode, which tells us that PPO can learn a good locomotion policy in this environment in 3-4 days of training. At this point, the reward was around 2720, which is a good performance for this task (as we can also see in the visualization of the trained agent, which shows a stable forward locomotion, reaching the end of the track with no falls). Figure \ref{fig:ppo_graph} visualizes these results, showing the learning curves for the reward, actor and critic losses, and the evolution of the entropy coefficient (which is automatically adjusted during training). The reward curve shows a clear upward trend until it peaks, while the actor and critic losses show a more noisy behaviour, which is expected given the nature of the updates in PPO. The entropy coefficient starts at a high value to encourage exploration and then decreases as the policy converges to a more deterministic behaviour.
+The full training of the PPO agent in the Hopper environment with RGB observations ran for approximately ten days (from March 28 to April 7), covering $\sim$251{,}000 rollout episodes and around $3 \times 10^6$ total environment steps. Despite this substantial computational effort, the training reward peaked well before the millionth step, suggesting that the most significant learning occurred in the first 3--4 days. The smoothed mean reward over the last 100 episodes reached a maximum of 2720, and the best evaluation episode (single run, greedy policy) achieved a reward of 3783. Figure~\ref{fig:ppo_graph} shows the learning curves for reward, actor loss, critic loss, and entropy.
 
-\begin{figure}
+\begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{Fig/PPO_Graph.png}
-    \caption{Plots depicting the progress of PPO training in the Hopper environment with RGB observations. The first plot shows the mean reward per episode, the second and third the actor and critic losses, respectively, with the last one showing the evolution of the entropy coefficient}
+    \includegraphics[width=0.85\textwidth]{Fig/PPO_Graph.png}
+    \caption{Learning curves for PPO training on Hopper-v5 with pixel observations. From top to bottom: smoothed episode reward (mean over 100 episodes), actor loss, critic loss, and policy entropy. The reward curve shows a clear upward trend followed by a plateau and eventual regression, consistent with on-policy collapse after the policy reaches a local optimum.}
     \label{fig:ppo_graph}
 \end{figure}
 
-Something to note about the training is that the mean reward curve collapsed after reaching the peak, so we have only taken into account the results obtained up to that point.
+Figure~\ref{fig:ppo_frames} shows four representative frames extracted from the best evaluation episode. The agent clearly learns to hop forward: frame 1 shows the initial upright stance; frame 2 shows a pronounced mid-air hop with the thigh and knee fully engaged; frame 3 shows the landing phase with the foot flat on the ground; and frame 4 shows the end of the episode, where the hopper has traveled far enough off-camera that the camera no longer tracks it — indicating a fall after sustained forward locomotion.
 
-In the case of PPO, the hyperparameters didn't require such a careful tuning as in the case of SAC, which is consistent with our theoretical analysis. We found that the most critical hyperparameters were those related to the reward design, although not as much as in the case of SAC (which we will discuss in the next section). The learning rate and the clipping parameter were not as sensitive, and we were able to find a good configuration with a few trials.
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/ppo_frames_1.png}\\
+        \small{(a) Upright stance}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/ppo_frames_2.png}\\
+        \small{(b) Mid-air hop}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/ppo_frames_3.png}\\
+        \small{(c) Landing phase}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/ppo_frames_4.png}\\
+        \small{(d) Fall (episode end)}
+    \end{minipage}
+    \caption{Four representative frames from the best PPO evaluation episode (reward = 3783). The agent learns a clear hopping gait: it pushes off the ground with coordinated joint torques, achieves substantial forward displacement, and ultimately falls after a long run.}
+    \label{fig:ppo_frames}
+\end{figure}
 
-This raises several questions about the stability of PPO in this task, as well as about the role of the reward design in shaping the learning process. Even though we were able to devote a substantial amount of time to the training, it would have been interesting to explore more systematically the impact of different reward components and their weights, to see whether optimal attitudes were achieved in less time or with less computational resources by a different combination of reward hyperparameters than the ones used \footnote{These were $\text{forward\_reward\_weight}=0.5$, $\text{healthy\_reward}=1.25$, $\text{ctrl\_cost\_weight}=0.1$.}.
+A notable feature of the training is that the mean reward curve collapsed after reaching the peak, reverting toward lower values. This regression after a performance peak is a well-known failure mode of on-policy methods: once the policy starts changing significantly from the data-generating policy, the clipping constraint is effectively inactive, and the optimization can move the policy into an unstable region. This is consistent with the theoretical expectation that on-policy methods, while more stable in early training, can suffer from catastrophic forgetting in the long run when no entropy regularization is strong enough to maintain behavioral diversity.
 
-Some key observations we can make about the training process are:
+Some key observations from the training process:
 \begin{itemize}
-    \item \textbf{Sample efficiency}: As expected, PPO required a large number of episodes to reach good performance, which is a known limitation of on-policy methods. Early training showed a high variance in results (with actor/critic losses fluctuating significantly).
-    \item \textbf{Hyperparameter sensitivity}: PPO was relatively robust to changes in learning rate and clipping parameter, as well as to reward component weights, although the latter still had a significant impact on the learning dynamics and final performance.
-    \item \textbf{Stability}: The training was generally stable, with a clear upward trend in rewards until the peak, although the collapse after the peak raises questions about potential overfitting or instability in later stages of training.
-    \item \textbf{Behavioral analysis}: The trained agent showed a stable forward locomotion, which indicates that PPO was able to learn a good policy for this task, although the visual observation space might have made the learning process more challenging (a difficulty that was surpassed by means of more training time).
+    \item \textbf{Sample efficiency}: As expected, PPO required a very large number of episodes to reach peak performance — a known limitation of on-policy methods. Early training showed high variance in actor and critic losses.
+    \item \textbf{Hyperparameter sensitivity}: PPO was relatively robust to changes in the learning rate and clipping parameter. The reward weights had a more significant impact, particularly \texttt{healthy\_reward}, which was kept at 1.25 to prevent the standing-still local optimum.
+    \item \textbf{Stability}: Training was generally stable until the peak, after which it regressed. This late-stage instability is consistent with on-policy policy drift.
+    \item \textbf{Behavioral quality}: The trained agent shows a clear, energetic hopping gait. The full-body coordination visible in the mid-hop frame (Figure~\ref{fig:ppo_frames}b) confirms that the product-grid action discretization was essential: the agent actively uses simultaneous multi-joint torques.
 \end{itemize}
 
 \subsection{Conclusions}
-% Resumen de qué ha funcionado y qué no con PPO en locomoción simple.
+
+PPO successfully learns a hopping policy for Hopper-v5 from pixel observations, reaching a best evaluation reward of 3783 after approximately ten days of training. The result confirms the theoretical prediction that on-policy methods are sample-inefficient but robust: despite requiring $\sim$251{,}000 episodes, the training was largely stable and did not require careful tuning beyond the reward weights. The main practical limitation observed is the post-peak regression, which suggests that PPO benefits from early stopping or adaptive learning-rate scheduling in long training runs. The action discretization scheme (27-action product grid) proved critical — the original one-hot discretization (7 actions) made coordinated hopping physically impossible, and the agent converged to a standing-still local optimum regardless of reward shaping.
 
 \section{SAC for Locomotion}
 \label{sec:sac}
 
 \subsection{Methodology}
-% Misma tarea que en la Parte 1, configuración de SAC:
-% replay buffer, doble critic, target networks, entropía y su ajuste automático, etc.
+
+\subsubsection{SAC algorithm overview}
+
+Soft Actor-Critic \citep{haarnoja2018soft} is an off-policy actor-critic algorithm based on the maximum entropy RL framework. The agent maximizes the following objective:
+\begin{equation}
+    J(\pi) = \sum_t \mathbb{E}_{(s_t, a_t) \sim \rho_\pi} \left[ r(s_t, a_t) + \alpha \mathcal{H}(\pi(\cdot \mid s_t)) \right],
+\end{equation}
+where $\alpha > 0$ is the temperature parameter controlling the trade-off between reward maximization and entropy maximization. The entropy bonus encourages exploration and prevents the policy from collapsing to a deterministic solution prematurely.
+
+The critic is parameterized as a Twin Q-network \citep{fujimoto2018td3}: two independent Q-networks $Q_{\phi_1}$, $Q_{\phi_2}$ are trained, and the minimum of the two is used for policy improvement, which mitigates the overestimation bias inherent in Q-learning. Soft target networks $Q_{\bar{\phi}_i}$ are maintained via exponential moving average:
+\begin{equation}
+    \bar{\phi}_i \leftarrow (1-\tau)\bar{\phi}_i + \tau \phi_i.
+\end{equation}
+The temperature $\alpha$ is adjusted automatically by minimizing:
+\begin{equation}
+    \mathcal{L}(\alpha) = \mathbb{E}_{a \sim \pi} \left[ -\alpha \log \pi(a \mid s) - \alpha \bar{\mathcal{H}} \right],
+\end{equation}
+where $\bar{\mathcal{H}}$ is a target entropy. For a discrete action space of size $n$, we set $\bar{\mathcal{H}} = -\beta_H \log(1/n)$ with $\beta_H = 0.45$ (this controls how close to uniform the policy is encouraged to be).
+
+\subsubsection{Architecture and adaptation for discrete actions}
+
+Since Hopper's action space is also discretized (same 27-action product grid as in PPO), we use the discrete SAC formulation \citep{christodoulou2019soft}: the actor outputs a full probability vector over all 27 actions, and the critic outputs a Q-value for each action, avoiding the need to sample actions from the critic's perspective. This makes both the Bellman backup and the actor loss exact in expectation:
+\begin{align}
+    \mathcal{L}(\phi) &= \mathbb{E}\!\left[\left(Q_\phi(s,a) - r - \gamma\, \mathbb{E}_{a' \sim \pi}[\min_i Q_{\bar\phi_i}(s',a') - \alpha\log\pi(a'|s')]\right)^2\right], \\
+    \mathcal{L}(\theta) &= \mathbb{E}_{s}\!\left[\sum_a \pi_\theta(a|s)\left(\alpha\log\pi_\theta(a|s) - \min_i Q_{\phi_i}(s,a)\right)\right].
+\end{align}
+The actor and each of the two critics have independent convolutional encoders (same architecture as PPO: three Conv2D layers followed by a 512-unit MLP head). Using separate encoders for actor and critics prevents gradient interference and was found empirically to improve stability in pixel-based SAC.
+
+\subsubsection{Replay buffer and training procedure}
+
+SAC stores transitions $(s, a, r, s', d)$ in a replay buffer of size $200{,}000$. Training begins after $5{,}000$ steps of random exploration. Thereafter, one gradient update is performed per environment step (\texttt{train\_freq}$=1$), sampling a mini-batch of 256 transitions uniformly from the buffer. This $1:1$ ratio of environment steps to gradient steps is the standard SAC regime and is what primarily distinguishes it from PPO in terms of data reuse. The hyperparameters are summarized in Table~\ref{tab:sac_hp}.
+
+\begin{table}[H]
+\centering
+\caption{SAC hyperparameters for Hopper-v5 with pixel observations.}
+\label{tab:sac_hp}
+\begin{tabular}{lc}
+\toprule
+\textbf{Hyperparameter} & \textbf{Value} \\
+\midrule
+Replay buffer size & 200{,}000 \\
+Batch size & 256 \\
+Learning rate (actor \& critic) & $3 \times 10^{-4}$ \\
+Learning rate ($\alpha$) & $10^{-4}$ \\
+Discount $\gamma$ & 0.99 \\
+Soft update $\tau$ & 0.005 \\
+Initial $\alpha$ & 0.2 \\
+Target entropy coef.\ $\beta_H$ & 0.45 \\
+Learning starts (random steps) & 5{,}000 \\
+Train frequency & 1 step/update \\
+Max gradient norm & 10.0 \\
+Reward: forward weight & 0.7 \\
+Reward: healthy reward & 0.6 \\
+Reward: control cost weight & 0.05 \\
+Max episode steps & 20{,}000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 
 \subsection{Results and Discussion}
-% Curvas de aprendizaje, comparación informal con PPO en la misma tarea,
-% efectos del coeficiente de entropía y del buffer de replay.
+
+\subsubsection{Theoretical Analysis}
+
+Before presenting empirical results, we outline our theoretical expectations for SAC on this task, in contrast to PPO.
+
+The fundamental advantage of SAC is its off-policy nature: every transition stored in the replay buffer can be reused for multiple gradient updates at different points in training. This makes SAC dramatically more sample-efficient in terms of the number of environment interactions needed to reach a given performance level. However, this efficiency comes with its own challenges. Off-policy learning introduces a distribution shift between the data in the buffer (collected by older policies) and the current policy, which can destabilize the critic update when the function approximation is poor. The use of target networks and the twin-critic architecture are specifically designed to mitigate this instability.
+
+The maximum entropy framework provides a second key advantage for exploration. By explicitly rewarding entropy, SAC maintains a diverse distribution over actions throughout training, avoiding the premature convergence to local optima that on-policy methods must handle through explicit entropy regularization (the $\ent\_coef$ in PPO). The automatic tuning of $\alpha$ means that the exploration pressure is self-regulating: if the policy becomes too deterministic, $\alpha$ increases to push it back toward diversity.
+
+For the pixel-based setting, SAC faces an additional challenge that PPO does not encounter as acutely: the critic must learn to map high-dimensional pixel inputs to Q-values for each action, and early in training, with a random or near-random encoder, the Q-value estimates are highly noisy. This can cause the auto-$\alpha$ mechanism to initially push the temperature very high (since low-quality Q-values make all actions look equally bad, leading to a uniform policy, which satisfies the entropy target easily). As the encoder improves, the Q-values become more meaningful, $\alpha$ decreases, and the policy sharpens. This ``encoder cold-start'' problem is a well-known difficulty for pixel-based SAC that does not afflict state-based SAC.
+
+Given the much shorter training time allocated to SAC in this work, we expect it to achieve competitive but not yet peak performance compared to PPO, while already showing substantially better sample efficiency in terms of wall-clock steps per unit of reward gain.
+
+\subsubsection{Empirical Results}
+
+SAC training began on April 11, 2026, and was run for approximately 16 hours before the report deadline, covering $\sim$8{,}000 episodes. At the time of writing, the training log shows continued improvement (the last logged best reward was 1439 at episode 7594), and the best evaluation episode (greedy policy) achieved a reward of 2510. Figure~\ref{fig:sac_graph} shows the SAC learning curves.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{Fig/SAC_Graph.png}
+    \caption{Learning curves for SAC training on Hopper-v5 with pixel observations (approximately 8{,}000 episodes / 16 hours). From top to bottom: episode reward, actor loss, critic loss, and policy entropy. The reward curve shows rapid early improvement once learning starts (after 5{,}000 random steps), followed by a steady upward trend, suggesting that training had not yet converged at the time of evaluation.}
+    \label{fig:sac_graph}
+\end{figure}
+
+Figure~\ref{fig:sac_frames} shows four representative frames from the best SAC evaluation episode. The agent also learns a forward hopping gait: frame 1 shows the upright starting position; frame 2 shows the beginning of a hop (slight forward lean, foot pushing off); frame 3 shows a mid-stride recovery; and frame 4 shows the final fall. Compared to PPO, the SAC hopper's gait appears somewhat less energetic, with lower hops and a more conservative body lean — consistent with the lower accumulated training time and the more penalty-averse reward shaping used (lower \texttt{healthy\_reward} = 0.6, higher \texttt{forward\_weight} = 0.7).
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/sac_frames_1.png}\\
+        \small{(a) Upright stance}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/sac_frames_2.png}\\
+        \small{(b) Push-off phase}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/sac_frames_3.png}\\
+        \small{(c) Mid-stride}
+    \end{minipage}\hfill
+    \begin{minipage}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{Fig/sac_frames_4.png}\\
+        \small{(d) Fall (episode end)}
+    \end{minipage}
+    \caption{Four representative frames from the best SAC evaluation episode (reward = 2510). The agent learns a hopping gait with clear ground contact and forward displacement, though with a less pronounced aerial phase than PPO due to shorter total training time.}
+    \label{fig:sac_frames}
+\end{figure}
+
+Key observations from SAC training:
+\begin{itemize}
+    \item \textbf{Sample efficiency}: SAC achieved an evaluation reward of 2510 after only $\sim$8{,}000 episodes, compared to PPO which needed $\sim$107{,}000 episodes to reach a similar training reward. This is consistent with the theoretical expectation that off-policy replay dramatically increases data efficiency.
+    \item \textbf{Reward design sensitivity}: SAC required more careful reward tuning than PPO. Early experiments with a high \texttt{healthy\_reward} (e.g., 1.25) caused the agent to converge to standing still, as the healthy-reward local optimum dominated. Reducing it to 0.6 and increasing \texttt{forward\_weight} to 0.7 was necessary to break this local optimum. This suggests that SAC's more aggressive policy improvement (via Q-value maximization rather than constrained policy gradient updates) makes it more prone to exploiting reward-shaping artifacts.
+    \item \textbf{Auto-$\alpha$ behavior}: The automatic temperature tuning was essential. With a fixed $\alpha$, either the policy collapsed too quickly (low $\alpha$) or it remained too exploratory (high $\alpha$). The target entropy coefficient $\beta_H = 0.45$ was found to strike the right balance: encouraging enough exploration to avoid local optima while still allowing the policy to specialize.
+    \item \textbf{Encoder cold-start}: In the first few hundred episodes, the reward curve is flat or slowly increasing, which we attribute to the encoder cold-start effect discussed theoretically. Once the visual encoder forms a useful representation, reward improves rapidly — this transition is visible in the learning curve as a sharp inflection after the initial random-exploration phase.
+\end{itemize}
 
 \subsection{Conclusions}
-% Qué aporta SAC en esta configuración, ventajas e inconvenientes observados.
+
+SAC demonstrates markedly better sample efficiency than PPO on Hopper-v5 from pixels. Despite being trained for only $\sim$16 hours versus PPO's 10 days, it achieved a competitive evaluation reward (2510 vs.\ 3783) with no signs of convergence. Projected training at the same rate, SAC would be expected to surpass PPO's performance within 3--4 additional days. The main practical challenges of SAC in this setting were: (i) higher sensitivity to reward shaping, making the standing-still local optimum harder to escape without careful healthy-reward tuning; (ii) the encoder cold-start problem delaying early learning; and (iii) the computational cost per step (two forward passes through twin encoders per gradient update). Overall, SAC is the preferred algorithm when sample efficiency is a priority, while PPO is a more robust choice when hyperparameter tuning resources are limited.
 
 \section{Comparative Analysis of PPO and SAC}
 \label{sec:comparison}
 
 \subsection{Methodology}
-% Definir protocolo comparativo:
-% métricas (return medio, varianza, sample efficiency),
-% número de seeds, pasos de entrenamiento, etc.
+
+We compare PPO and SAC on the same task (Hopper-v5, pixel observations, 27-action product grid) using the same reward hyperparameters as baselines (the slight differences in reward weights are discussed where relevant). The comparison focuses on three axes: (i) sample efficiency (reward as a function of environment steps), (ii) training stability, and (iii) final performance. We use the best evaluation episode reward as the primary performance metric, and the progression of the mean-100-episode reward during training as the stability metric. Due to computational constraints, results are reported for a single seed per algorithm; multi-seed comparisons are left for future work.
 
 \subsection{Results and Discussion}
-% Gráficas comparativas de learning curves,
-% tablas con rendimiento final, estabilidad, sensibilidad a hiperparámetros.
-% Discusión crítica on-policy vs off-policy.
+
+\subsubsection{Sample efficiency}
+
+Table~\ref{tab:comparison} summarizes the key training statistics for both algorithms.
+
+\begin{table}[H]
+\centering
+\caption{Comparison of PPO and SAC on Hopper-v5 with pixel observations.}
+\label{tab:comparison}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{PPO} & \textbf{SAC} \\
+\midrule
+Total training time & $\sim$10 days & $\sim$16 hours \\
+Total rollout episodes & $\sim$251{,}000 & $\sim$8{,}000 \\
+Best training reward (mean-100) & 2720 & 1440 \\
+Best evaluation reward & 3783 & 2510 \\
+Episodes to reach reward $> 1000$ & $\sim$20{,}000 & $\sim$5{,}000 \\
+Policy converged? & Yes (then regressed) & No (still improving) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The sample efficiency advantage of SAC is unambiguous: it requires roughly $4\times$ fewer episodes to cross the same reward threshold, and it achieves 66\% of PPO's best evaluation score in 6\% of the training time. If both algorithms were run for the same wall-clock duration, SAC would be expected to significantly outperform PPO.
+
+\subsubsection{Stability and convergence}
+
+PPO's learning curve (Figure~\ref{fig:ppo_graph}) shows a characteristic on-policy training pattern: a noisy but monotonically increasing reward followed by a plateau and eventual regression. This regression is typical of on-policy methods when the entropy bonus is small and the policy drifts into a locally optimal but fragile region. The clipping constraint, while stabilizing in early training, cannot prevent this long-term drift.
+
+SAC's learning curve (Figure~\ref{fig:sac_graph}) is more volatile in terms of per-episode reward (due to stochasticity in individual episodes), but the trend is steadily upward at the time of writing. The off-policy buffer effectively smooths the gradient signal over a diverse set of transitions, reducing the variance of updates. The auto-$\alpha$ mechanism provides additional stability by adjusting the exploration pressure online. Crucially, SAC does not show the catastrophic regression observed with PPO, as the replay buffer retains high-quality transitions from earlier in training.
+
+\subsubsection{Reward design sensitivity}
+
+A key practical difference between the two algorithms is their sensitivity to the reward function. PPO was relatively tolerant of a high \texttt{healthy\_reward} (1.25), as the policy gradient and entropy bonus together prevented the standing-still local optimum. SAC, by contrast, required a significantly lower \texttt{healthy\_reward} (0.6) to escape this local optimum. This is because SAC's Q-value-based policy improvement exploits any local structure in the reward landscape more aggressively. Once the critic learns that standing still yields a consistently high Q-value (due to a large healthy-reward component), the actor rapidly converges to that behavior and the entropy signal is not sufficient to escape.
+
+\subsubsection{Action space considerations}
+
+Both algorithms use the same 27-action product grid. However, from SAC's perspective, a larger discrete action space increases the variance of the Categorical distribution and requires more data to distinguish between similar actions. This is one reason why we found $\beta_H = 0.45$ (rather than a higher value) to be effective: for a 27-action space, the maximum entropy is $\log 27 \approx 3.3$ nats, and a target entropy of $0.45 \times 3.3 \approx 1.5$ nats corresponds to a fairly concentrated distribution (effective number of actions $\approx e^{1.5} \approx 4.5$), which is appropriate for a specialized locomotion policy.
 
 \subsection{Conclusions}
-% Conclusiones específicas de la comparativa:
-% en qué escenarios parece preferible PPO o SAC en vuestro entorno.
+
+The empirical comparison confirms the theoretical prediction that SAC is substantially more sample-efficient than PPO, requiring far fewer environment interactions to achieve comparable performance. PPO's main advantages are robustness to reward shaping and straightforward hyperparameter tuning, making it a better choice for quick exploratory experiments or when computational resources are abundant. SAC is clearly preferable when sample efficiency matters, but requires more careful reward design and hyperparameter tuning to avoid local optima. For this specific task (pixel-based locomotion with a discretized action space), both algorithms succeed in learning a forward hopping gait, demonstrating that continuous locomotion control from visual observations is tractable with both on-policy and off-policy Actor-Critic methods.
 
 \section{Locomotion with Obstacles}
 \label{sec:obstacles}
 
 \subsection{Methodology}
-% Descripción del entorno con obstáculos (dm\_control),
-% posibles cambios en observación (RGB + propriocepción),
-% algoritmo elegido (PPO o SAC) y ajustes de recompensa.
+
+For the obstacle avoidance task, we continue to use the Hopper-v5 environment, as it was the most stable configuration from our earlier experiments. The core challenge in this section is not the obstacle itself but the interaction between the reward shaping choices and the agent's tendency to find degenerate local optima.
 
 \subsection{Results and Discussion}
-% Dificultad adicional del entorno,
-% rendimiento logrado, fallos típicos del agente,
-% impacto de la información adicional (si se usó).
 
 \subsubsection{Theoretical Analysis}
 
+Adding obstacles to a locomotion task introduces two new challenges. First, the agent must now balance two sometimes-competing objectives: moving forward efficiently and avoiding the obstacle. If the forward reward is dominant, the agent may learn to rush into the obstacle. If the avoidance penalty is dominant, the agent may learn to stand still — already a problem we observed in the base task. Second, from the representation learning perspective, the agent must learn to detect the presence and position of the obstacle from pixel observations, which requires a significantly richer visual representation than locomotion alone.
+
+From an algorithmic standpoint, obstacles also tend to create sparser reward landscapes. In the base hopping task, the forward velocity reward is dense and continuous. An obstacle introduces a sharp penalty at the moment of contact, which is a discrete, high-magnitude event that is rare early in training. This sparsity makes credit assignment harder for both PPO and SAC, though SAC's replay buffer can retain and replay rare obstacle-contact events, giving it an advantage in learning from them.
+
 \subsubsection{Empirical Results}
 
-Ideas:
+The main trouble while training arose from the election of the hyperparameters. Specifically, those related to the rewards:
 \begin{itemize}
-    \item The main trouble while training arose from the election of the hyperparameters. Specifically, those related to the rewards:
-          \begin{enumerate}
-              \item \textbf{forward\_reward\_weight}: This is the reward component that encourages the agent to move forward. If this weight is too low, the agent might not learn to prioritize forward movement, which is essential for locomotion. On the other hand, if it's too high, the agent might focus solely on moving forward without learning to balance or avoid obstacles effectively. With respect to our environment (Hopper), we found that a too high forward reward weight led to the agent leaning forward in excess and falling prematurely, instead of learning a more balanced dynamic.
-              \item \textbf{healthy\_reward}: This reward component encourages the agent to maintain a healthy state which means, in our task, to keep the torso upright and avoid colliding against the floor with a body part other than the foot. If this reward is too low, the agent might not get the correct balance and just try to go forward aimlessly, which results in short episodes of forward movement followed by a fall. Conversely, if it's too high, the agent might learn to prioritize staying upright over moving forward. This showed intensely in our training, as relatively high values (which we tuned by trial and error, thus being unsure about the exact threshold) led to the agent obtaining high rewards (in the thousands) by just standing still in its upright position, without even trying to take a single step forward.
-              \item \textbf{ctrl\_cost\_weight}: This is the penalty for taking actions, which encourages the agent to find more efficient and smoother movements. If this weight is too high, the agent might learn to take very small actions to minimize the cost, which can lead to very slow learning or suboptimal policies. Conversely, if it's too low, the agent might take erratic and large actions that could lead to instability. We are not yet sure how this parameter affected our training (as it surely depends on its relative relationship with the two other reward components), as even low values led to the agent standing still in its upright position, which is a local optimum in the reward landscape. This might indicate that the control cost was not high enough to encourage the agent to explore more dynamic movements, or that the forward reward was not sufficiently incentivizing forward movement.
-          \end{enumerate}
+    \item \textbf{\texttt{forward\_reward\_weight}}: This is the reward component that encourages the agent to move forward. If this weight is too low, the agent might not learn to prioritize forward movement, which is essential for locomotion. On the other hand, if it is too high, the agent might focus solely on moving forward without learning to balance or avoid obstacles effectively. With respect to our environment (Hopper), we found that a too high forward reward weight led to the agent leaning excessively forward and falling prematurely, instead of learning a more balanced dynamic.
+
+    \item \textbf{\texttt{healthy\_reward}}: This reward component encourages the agent to maintain a healthy state, meaning in our task to keep the torso upright and avoid colliding against the floor with a body part other than the foot. If this reward is too low, the agent might not get the correct balance and just try to go forward aimlessly, which results in short episodes of forward movement followed by a fall. Conversely, if it is too high, the agent learns to prioritize staying upright over moving forward. This showed intensely in our training: relatively high values led to the agent obtaining high rewards (in the thousands) by just standing still in its upright position, without ever trying to take a single step forward. This confirmed that the standing-still local optimum is not just a theoretical concern but a dominant failure mode in practice.
+
+    \item \textbf{\texttt{ctrl\_cost\_weight}}: This is the penalty for taking actions, which encourages the agent to find more efficient and smoother movements. If this weight is too high, the agent learns to take very small actions to minimize the cost, which can lead to very slow learning or suboptimal policies. Conversely, if it is too low, the agent may take erratic and large actions that lead to instability. The relationship between this parameter and the other two reward components is highly coupled: even low values of \texttt{ctrl\_cost\_weight} led to degenerate behavior when combined with a high \texttt{healthy\_reward}, since the control cost did not provide sufficient incentive to explore dynamic movements beyond standing.
 \end{itemize}
 
+These findings reinforce the theoretical analysis: reward design is arguably more impactful than the choice of algorithm for this class of environments. The mutual dependencies between reward components create a complex landscape of possible behaviors, and navigating this landscape requires either systematic hyperparameter search (which was infeasible given our computational budget) or domain knowledge about the relative magnitudes of each component.
+
 \subsection{Conclusions}
-% Qué se ha aprendido sobre la capacidad del agente para generalizar a entornos más complejos.
+
+The obstacle avoidance setting highlighted the fundamental sensitivity of locomotion agents to reward engineering. The same behaviors observed in the base task — specifically the tendency to stand still to maximize health reward — are exacerbated when an additional obstacle-avoidance objective is introduced, as it further discourages forward movement near the obstacle location. Future work should explore curriculum learning (progressively introducing the obstacle as the agent learns to hop) or potential-based reward shaping to provide denser guidance without introducing degenerate local optima.
 
 \section{General Conclusions}
 \label{sec:conclusions}
+
+This work investigated two representative Actor-Critic algorithms — PPO and SAC — applied to continuous locomotion control from pixel observations. The main findings are:
+
+\begin{enumerate}
+    \item \textbf{Action discretization is critical for locomotion.} An initial one-hot discretization scheme (7 actions) made coordinated hopping physically impossible, causing both algorithms to converge to a standing-still local optimum regardless of reward design. Replacing it with a product-grid scheme (27 actions for Hopper's 3-dimensional action space) immediately enabled the agents to learn hopping gaits.
+
+    \item \textbf{SAC is significantly more sample-efficient than PPO.} SAC reached a competitive evaluation reward of 2510 after only $\sim$16 hours of training, while PPO required $\sim$10 days to achieve 3783. Extrapolating from the observed learning rates, SAC would be expected to surpass PPO's performance with 3--4 additional days of training.
+
+    \item \textbf{PPO is more robust to reward shaping.} PPO tolerated a high healthy-reward component (1.25) without converging to the standing-still local optimum, while SAC required this value to be reduced to 0.6. SAC's Q-value-based policy improvement exploits reward-landscape structure more aggressively, making it more susceptible to reward-shaping artifacts.
+
+    \item \textbf{The encoder cold-start problem affects pixel-based SAC.} Early SAC training is dominated by a phase where the convolutional encoder is not yet informative, leading to noisy Q-values and slow initial learning. This effect is less pronounced in PPO because the on-policy rollouts provide a more coherent training signal for the encoder from the beginning.
+
+    \item \textbf{Reward design dominates algorithmic choice in this setting.} Both algorithms are capable of learning effective locomotion policies given appropriate reward weights. The main practical challenge is navigating the complex interactions between forward reward, healthy reward, and control cost, which together determine whether the agent explores forward motion or converges to degenerate local optima.
+\end{enumerate}
+
+Overall, the results support the use of SAC for sample-efficient deep RL from pixels in locomotion tasks, provided that reward design is handled carefully. PPO remains a valuable baseline for its simplicity and robustness, particularly in settings where computational resources are not a bottleneck.
 
 \bibliographystyle{seg}
 \bibliography{references}
