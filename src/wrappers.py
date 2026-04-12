@@ -3,6 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 from gymnasium.wrappers import FrameStackObservation
+import itertools
 
 
 # ---------------------------------------------------------------------------
@@ -18,14 +19,16 @@ class DiscretizedActionWrapper(gym.ActionWrapper):
         high = self.env.action_space.high
         n_dims = self.env.action_space.shape[0]
 
-        actions = [np.zeros(n_dims, dtype=np.float32)]
-        for i in range(n_dims):
-            values = np.linspace(low[i], high[i], bins)
-            for v in values:
-                if not np.isclose(v, 0.0):
-                    a = np.zeros(n_dims, dtype=np.float32)
-                    a[i] = v
-                    actions.append(a)
+        # actions = [np.zeros(n_dims, dtype=np.float32)]
+        # for i in range(n_dims):
+        #     values = np.linspace(low[i], high[i], bins)
+        #     for v in values:
+        #         if not np.isclose(v, 0.0):
+        #             a = np.zeros(n_dims, dtype=np.float32)
+        #             a[i] = v
+        #             actions.append(a)
+        per_dim = [np.linspace(low[i], high[i], bins) for i in range(n_dims)]
+        actions = [np.array(comb, dtype=np.float32) for comb in itertools.product(*per_dim)]
 
         self.actions_grid = np.array(actions, dtype=np.float32)
         self.action_space = Discrete(len(self.actions_grid))

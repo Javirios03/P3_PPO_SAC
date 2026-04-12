@@ -90,10 +90,10 @@ sac_hopper_pixel:
   alpha: 0.2
   auto_alpha: true
   learning_starts: 5000
-  train_freq: 8
+  train_freq: 1
   max_grad_norm: 10.0
   # target_entropy_coef: 0.70
-  target_entropy_coef: 0.8
+  target_entropy_coef: 0.45
   alpha_lr: 1e-4
   env_kwargs:
     max_episode_steps: 20000
